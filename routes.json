@@ -1,0 +1,26 @@
+{
+  "currency": "KRW",
+  "language": "ko-KR",
+  "pause_seconds": 4,
+  "routes": [
+    {
+      "name": "서울-도쿄 편도",
+      "origin": "ICN",
+      "destination": "NRT",
+      "trip": "one-way",
+      "dates": ["2026-12-10", "2026-12-11"],
+      "max_stops": 0,
+      "target_price_krw": 150000
+    },
+    {
+      "name": "서울-오사카 왕복",
+      "origin": "ICN",
+      "destination": "KIX",
+      "trip": "round-trip",
+      "dates": ["2027-01-15"],
+      "stay_days": 4,
+      "max_stops": 0,
+      "target_price_krw": 250000
+    }
+  ]
+}
