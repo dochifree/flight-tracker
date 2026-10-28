@@ -6,9 +6,13 @@ on:
   workflow_dispatch: {}
 permissions:
   contents: write
+concurrency:
+  group: track-flights
+  cancel-in-progress: false
 jobs:
   track:
     runs-on: ubuntu-latest
+    timeout-minutes: 130
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,8 +25,9 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       - name: 결과 커밋
+        if: always()
         run: |
           git config user.name "flight-tracker-bot"
           git config user.email "bot@users.noreply.github.com"
           git add data/
-          git diff --cached --quiet || (git commit -m "data: 가격 업데이트 $(date -u +%F\ %H:%M) UTC" && git push)
+          git diff --cached --quiet || (git commit -m "data: 가격 업데이트 $(date -u +%F\ %H:%M) UTC" && git pull --rebase && git push)
