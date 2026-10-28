@@ -9,7 +9,16 @@ import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from fast_flights import FlightQuery, FlightsNotFound, Passengers, create_query, get_flights
+from fast_flights import FlightQuery, Passengers, create_query, get_flights
+
+try:  # 라이브러리 버전에 따라 없을 수 있음
+    from fast_flights import FlightsNotFound
+except ImportError:
+    class FlightsNotFound(Exception):
+        pass
+
+PARSE_ERRORS = (IndexError, KeyError, TypeError, ValueError, AttributeError)
+_debug_done = False
 
 ROOT = Path(__file__).parent
 CSV_PATH = ROOT / "data" / "prices.csv"
@@ -46,23 +55,56 @@ def search(route: dict, depart: str, cfg: dict):
         flights=flights, seat="economy", trip=route["trip"],
         passengers=Passengers(adults=1), language=cfg["language"], currency=cfg["currency"],
     )
+    results = None
     for attempt in range(3):
         try:
             results = get_flights(q)
             break
         except FlightsNotFound:
             return None, ret
-        except Exception as e:  # 네트워크 오류, 차단 등
+        except PARSE_ERRORS as e:  # 응답 구조를 읽지 못함: 재시도해도 같음
+            print(f"  응답 해석 실패: {type(e).__name__}: {e}", file=sys.stderr)
+            debug_response(q)
+            return None, ret
+        except Exception as e:  # 네트워크 오류 등
             print(f"  재시도 {attempt + 1}/3: {type(e).__name__}: {e}", file=sys.stderr)
-            time.sleep(10 * (attempt + 1))
-    else:
+            time.sleep(5 * (attempt + 1))
+    if results is None:
         return None, ret
+    diag = getattr(results, "diagnostics", None)
+    if diag is not None:
+        print(f"  진단: {diag}")
+    if not results:
+        debug_response(q)
     priced = [r for r in results if r.price and r.price > 0]
     return (min(priced, key=lambda r: r.price) if priced else None), ret
 
 
 def fmt_time(t) -> str:
-    return f"{t.time[0]:02d}:{t.time[1]:02d}"
+    """[8] 처럼 분이 생략되거나 None이 섞인 시간 표기도 처리."""
+    vals = list(getattr(t, "time", None) or [])
+    vals += [None, None]
+    return f"{(vals[0] or 0):02d}:{(vals[1] or 0):02d}"
+
+
+def debug_response(q) -> None:
+    """실패 시 구글이 실제로 무엇을 돌려줬는지 요약(첫 1회만)."""
+    global _debug_done
+    if _debug_done:
+        return
+    _debug_done = True
+    try:
+        from fast_flights import fetch_flights_html
+        html = fetch_flights_html(q)
+        html = html if isinstance(html, str) else str(getattr(html, "text", html))
+        low = html.lower()
+        title = html.split("<title>", 1)[1].split("</title>", 1)[0][:80] if "<title>" in html else "(없음)"
+        print("  [진단] 응답 길이:", len(html), "/ 제목:", title)
+        print("  [진단] ds:1 데이터 포함:", "ds:1" in html,
+              "/ 동의화면 단서:", "consent" in low,
+              "/ 비정상 트래픽 단서:", "unusual traffic" in low or "captcha" in low)
+    except Exception as e:
+        print(f"  [진단] 응답 확인 실패: {type(e).__name__}: {e}", file=sys.stderr)
 
 
 def notify(text: str) -> None:
