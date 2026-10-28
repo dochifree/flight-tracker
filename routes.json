@@ -1,26 +1,48 @@
 {
   "currency": "KRW",
   "language": "ko-KR",
-  "pause_seconds": 4,
-  "routes": [
-    {
-      "name": "서울-도쿄 편도",
-      "origin": "ICN",
-      "destination": "NRT",
-      "trip": "one-way",
-      "dates": ["2026-12-10", "2026-12-11"],
-      "max_stops": 0,
-      "target_price_krw": 150000
+  "origins": ["ICN", "GMP"],
+  "nights": [2, 3, 4, 5],
+  "start_offset_days": 1,
+  "horizon_days": 120,
+  "max_stops": 0,
+  "queries_per_run": 600,
+  "pause_seconds": 2,
+  "max_minutes": 100,
+  "abort_after_errors": 12,
+  "empty_limit_new": 5,
+  "empty_limit_known": 15,
+  "skip_days": 14,
+  "alert": {
+    "ratio": 0.75,
+    "min_samples": 12,
+    "lookback_days": 60
+  },
+  "destinations": {
+    "일본": {
+      "NRT": "도쿄 나리타", "HND": "도쿄 하네다", "KIX": "오사카 간사이", "NGO": "나고야",
+      "FUK": "후쿠오카", "CTS": "삿포로", "OKA": "오키나와", "HIJ": "히로시마",
+      "KMJ": "구마모토", "SDJ": "센다이", "KOJ": "가고시마", "TAK": "다카마쓰",
+      "MYJ": "마쓰야마", "OIT": "오이타", "NGS": "나가사키", "TOY": "도야마",
+      "KMQ": "고마쓰", "AOJ": "아오모리"
     },
-    {
-      "name": "서울-오사카 왕복",
-      "origin": "ICN",
-      "destination": "KIX",
-      "trip": "round-trip",
-      "dates": ["2027-01-15"],
-      "stay_days": 4,
-      "max_stops": 0,
-      "target_price_krw": 250000
+    "중국": {
+      "PEK": "베이징 서우두", "PKX": "베이징 다싱", "PVG": "상하이 푸둥", "SHA": "상하이 훙차오",
+      "CAN": "광저우", "SZX": "선전", "CTU": "청두 솽류", "TFU": "청두 톈푸",
+      "HGH": "항저우", "XIY": "시안", "CKG": "충칭", "TAO": "칭다오",
+      "DLC": "다롄", "SHE": "선양", "HRB": "하얼빈", "KMG": "쿤밍",
+      "NKG": "난징", "WUH": "우한", "CSX": "창사", "XMN": "샤먼",
+      "TSN": "톈진", "SYX": "싼야", "HAK": "하이커우", "YNJ": "옌지",
+      "WEH": "웨이하이", "YNT": "옌타이", "HKG": "홍콩", "MFM": "마카오"
+    },
+    "동남아": {
+      "BKK": "방콕 수완나품", "DMK": "방콕 돈므앙", "HKT": "푸껫", "CNX": "치앙마이",
+      "SGN": "호치민", "HAN": "하노이", "DAD": "다낭", "CXR": "나트랑",
+      "PQC": "푸꾸옥", "HPH": "하이퐁", "MNL": "마닐라", "CEB": "세부",
+      "CRK": "클락", "KLO": "칼리보(보라카이)", "TAG": "보홀", "KUL": "쿠알라룸푸르",
+      "BKI": "코타키나발루", "PEN": "페낭", "SIN": "싱가포르", "CGK": "자카르타",
+      "DPS": "발리", "PNH": "프놈펜", "REP": "씨엠립", "SAI": "씨엠립 신공항",
+      "VTE": "비엔티안", "RGN": "양곤"
     }
-  ]
+  }
 }
