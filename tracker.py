@@ -202,9 +202,9 @@ def leave_days(depart: date, ret: date, holidays: set) -> int:
     return n
 
 
-def leave_band(leave: int, split: int) -> str:
-    """기준선(중앙값)은 연차를 적게 쓰는 일정끼리, 많이 쓰는 일정끼리 따로 계산한다."""
-    return "low" if leave <= split else "high"
+def nonwork_days(depart: date, ret: date, holidays: set) -> int:
+    """출발일~귀국일(양끝 포함) 중 주말·공휴일인 날 수."""
+    return (ret - depart).days + 1 - leave_days(depart, ret, holidays)
 
 
 def plan_tasks(cfg: dict, pairs: list, state: dict, today: date) -> list:
@@ -215,19 +215,15 @@ def plan_tasks(cfg: dict, pairs: list, state: dict, today: date) -> list:
     first = today + timedelta(days=cfg["start_offset_days"])
     window = [first + timedelta(days=i) for i in range(cfg["horizon_days"])]
     per_pair = max(1, cfg["queries_per_run"] // len(active))
-    holidays, split = set(cfg.get("holidays", [])), cfg.get("low_leave_max", 2)
-    # 연차를 적게 쓰는 일정(low)과 많이 쓰는 일정(high)을 나눠 두고, low 쪽을 더 많이 뽑는다.
-    # (연차 제한은 두지 않는다. 연차를 더 써도 싸면 알림 대상이다.)
-    low, high = [], []
-    for d in window:
-        for n in cfg["nights"]:
-            (low if leave_days(d, d + timedelta(days=n), holidays) <= split else high).append((d, n))
-    n_low = min(len(low), round(per_pair * cfg.get("low_leave_share", 0.6)))
-    n_high = min(len(high), per_pair - n_low)
+    holidays, need = set(cfg.get("holidays", [])), cfg.get("min_nonwork_days", 2)
+    # 주말·공휴일이 need일 이상 낀 (출발일, 박수) 조합만 후보로 삼는다. 연차 일수는 제한하지 않는다.
+    combos = [(d, n) for d in window for n in cfg["nights"]
+              if nonwork_days(d, d + timedelta(days=n), holidays) >= need]
+    if not combos:
+        return []
     tasks = []
     for p in active:
-        picks = random.sample(low, n_low) + random.sample(high, n_high)
-        for d, n in picks:
+        for d, n in random.sample(combos, min(per_pair, len(combos))):
             tasks.append({**p, "depart": d, "nights": n})
     random.shuffle(tasks)
     return tasks[: cfg["queries_per_run"]]
@@ -346,6 +342,7 @@ def main() -> int:
     summary_only = "--summary-only" in sys.argv  # 조회 없이 요약 파일만 다시 만들 때
     t0 = time.time()
     cfg = json.loads((ROOT / "routes.json").read_text(encoding="utf-8"))
+    holidays, need = set(cfg.get("holidays", [])), cfg.get("min_nonwork_days", 2)
     data_dir = ROOT / "data"
     now_kst = datetime.now(KST)
     today = now_kst.date()
@@ -414,39 +411,45 @@ def main() -> int:
         key = f"{blk['origin']}-{blk['dest']}"
         st = state["pairs"].setdefault(key, {"empty": 0, "ok": 0, "skip_until": ""})
         out, back = {}, {}
-        for d in blk["days"]:
-            for a, b, store in ((blk["origin"], blk["dest"], out), (blk["dest"], blk["origin"], back)):
-                if st.get("skip_until", "") >= today.isoformat():
-                    break
-                status, best = search_oneway(a, b, d, cfg)
-                counts[status] += 1
-                if status == "ok":
-                    leg_errors = 0
-                    st["ok"] += 1
-                    st["empty"] = 0
-                    store[d] = best
-                elif status == "empty":
-                    leg_errors = 0
-                    st["empty"] += 1
-                    limit = cfg.get("empty_limit_new", 5) if st["ok"] == 0 else cfg.get("empty_limit_known", 15)
-                    if st["empty"] >= limit:
-                        st["skip_until"] = (today + timedelta(days=cfg.get("skip_days", 14))).isoformat()
-                        st["empty"] = 0
-                        print(f"  {key}: 편도 결과가 계속 없어 {cfg.get('skip_days', 14)}일간 조회에서 제외")
-                else:
-                    leg_errors += 1
-                    if leg_errors >= cfg.get("abort_after_errors", 12):
-                        print("편도 조회 연속 오류가 많아 편도 조합 조회를 중단합니다.", file=sys.stderr)
-                        leg_aborted = True
-                        break
-                time.sleep(cfg.get("pause_seconds", 2))
-            if leg_aborted:
+        # 주말·공휴일이 충분히 낀 (가는 날, 오는 날) 쌍에 필요한 날짜만 조회한다.
+        days = set(blk["days"])
+        pairs_ok = [(d, d + timedelta(days=n)) for d in blk["days"] for n in cfg["nights"]
+                    if d + timedelta(days=n) in days
+                    and nonwork_days(d, d + timedelta(days=n), holidays) >= need]
+        need_out = sorted({a for a, _ in pairs_ok})
+        need_back = sorted({b for _, b in pairs_ok})
+        todo = [(blk["origin"], blk["dest"], d, out) for d in need_out] + \
+               [(blk["dest"], blk["origin"], d, back) for d in need_back]
+        for a, b, d, store in todo:
+            if st.get("skip_until", "") >= today.isoformat():
                 break
+            status, best = search_oneway(a, b, d, cfg)
+            counts[status] += 1
+            if status == "ok":
+                leg_errors = 0
+                st["ok"] += 1
+                st["empty"] = 0
+                store[d] = best
+            elif status == "empty":
+                leg_errors = 0
+                st["empty"] += 1
+                limit = cfg.get("empty_limit_new", 5) if st["ok"] == 0 else cfg.get("empty_limit_known", 15)
+                if st["empty"] >= limit:
+                    st["skip_until"] = (today + timedelta(days=cfg.get("skip_days", 14))).isoformat()
+                    st["empty"] = 0
+                    print(f"  {key}: 편도 결과가 계속 없어 {cfg.get('skip_days', 14)}일간 조회에서 제외")
+            else:
+                leg_errors += 1
+                if leg_errors >= cfg.get("abort_after_errors", 12):
+                    print("편도 조회 연속 오류가 많아 편도 조합 조회를 중단합니다.", file=sys.stderr)
+                    leg_aborted = True
+                    break
+            time.sleep(cfg.get("pause_seconds", 2))
         for d, o_leg in out.items():
             for n in cfg["nights"]:
                 r_day = d + timedelta(days=n)
                 b_leg = back.get(r_day)
-                if b_leg is None:
+                if b_leg is None or (d, r_day) not in pairs_ok:
                     continue
                 rows.append({
                     "collected_at": stamp, "region": blk["region"], "origin": blk["origin"],
@@ -472,8 +475,8 @@ def main() -> int:
     acfg = cfg.get("alert", {})
     recent = load_recent_prices(data_dir, today, acfg.get("lookback_days", 60))
     groups = cfg.get("carrier_groups", {})
-    holidays, split = set(cfg.get("holidays", [])), cfg.get("low_leave_max", 2)
-    by_pair: dict = {}  # (출발, 도착, 항공사 유형, 연차 구분) 별로 따로 모아 같은 조건끼리만 비교
+    holidays, need = set(cfg.get("holidays", [])), cfg.get("min_nonwork_days", 2)
+    by_pair: dict = {}  # (출발, 도착, 항공사 유형) 별로 따로 모아 같은 노선·같은 유형끼리만 비교
     # 기준선은 "지금 조회 범위(내일부터 horizon_days일)에 출발하는 일정"만으로 계산한다.
     # 이미 출발했거나 범위를 벗어난 일정의 가격은 지금과 시즌이 달라 제외한다.
     win_lo = today + timedelta(days=cfg["start_offset_days"])
@@ -484,8 +487,10 @@ def main() -> int:
             r["leave"] = leave_days(date.fromisoformat(r["depart_date"]), date.fromisoformat(r["return_date"]), holidays)
         except (ValueError, KeyError):
             continue
+        if (date.fromisoformat(r["return_date"]) - date.fromisoformat(r["depart_date"])).days + 1 - r["leave"] < need:
+            continue  # 주말·공휴일이 충분히 끼지 않은 일정은 기준선에서도 뺀다
         r["tier"] = carrier_group(r.get("airlines", ""), groups)
-        by_pair.setdefault((r["origin"], r["destination"], r["tier"], leave_band(r["leave"], split)), []).append(r)
+        by_pair.setdefault((r["origin"], r["destination"], r["tier"], 0), []).append(r)
 
     names = {(p["origin"], p["dest"]): (p["name"], p["region"]) for p in pairs}
     deals_path = data_dir / "deals.csv"
@@ -496,8 +501,10 @@ def main() -> int:
     new_deals = []
     for r in rows:
         r["leave"] = leave_days(date.fromisoformat(r["depart_date"]), date.fromisoformat(r["return_date"]), holidays)
+        if r["leave"] > acfg.get("max_leave_days", 3):
+            continue  # 연차를 너무 많이 써야 하는 일정은 알리지 않는다
         tier = carrier_group(r["airlines"], groups)
-        samples = by_pair.get((r["origin"], r["destination"], tier, leave_band(r["leave"], split)), [])
+        samples = by_pair.get((r["origin"], r["destination"], tier, 0), [])
         if len(samples) < acfg.get("min_samples", 8):
             continue
         med = statistics.median(s["price_krw"] for s in samples)
