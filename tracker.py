@@ -459,36 +459,42 @@ def build_offers(by_pair: dict, names: dict, today: date, stamp: str) -> list:
     return _sort(out)
 
 
-def main() -> int:
-    summary_only = "--summary-only" in sys.argv  # 조회 없이 요약 파일만 다시 만들 때
-    t0 = time.time()
-    cfg = json.loads((ROOT / "routes.json").read_text(encoding="utf-8"))
+def plan_full(cfg: dict, pairs: list, state: dict, today: date) -> list:
+    """전수 조회 계획: 조건에 맞는 모든 (노선, 출발일, 박수)를 순서대로 나열한다.
+    아직 직항이 확인되지 않은 노선(저장된 가격이 한 번도 없는 노선)은 probe_total건만 시험 조회한다.
+    같은 입력이면 항상 같은 목록이 나오므로, 여러 작업(shard)이 각자 자기 몫(tasks[shard::shards])만 가져가 나눠 조회할 수 있다."""
+    active = [p for p in pairs
+              if state["pairs"].get(f"{p['origin']}-{p['dest']}", {}).get("skip_until", "") < today.isoformat()]
+    first = today + timedelta(days=cfg["start_offset_days"])
+    window = [first + timedelta(days=i) for i in range(cfg["horizon_days"])]
     holidays, need = set(cfg.get("holidays", [])), cfg.get("min_nonwork_days", 2)
-    data_dir = ROOT / "data"
-    now_kst = datetime.now(KST)
-    today = now_kst.date()
-    stamp = now_kst.strftime("%Y-%m-%d %H:%M")
+    combos = [(d, n) for d in window for n in cfg["nights"]
+              if nonwork_days(d, d + timedelta(days=n), holidays) >= need]
+    probe_total = cfg.get("probe_total", 6)
+    tasks = []
+    for p in active:
+        st = state["pairs"].get(f"{p['origin']}-{p['dest']}", {})
+        mine = [{**p, "depart": d, "nights": n} for d, n in combos]
+        if st.get("ok", 0) == 0 and mine:
+            step = max(1, len(mine) // probe_total)
+            mine = mine[::step][:probe_total]
+        tasks.extend(mine)
+    tasks.sort(key=lambda t: (t["origin"], t["dest"], t["depart"], t["nights"]))
+    return tasks
 
-    state_path = data_dir / "state.json"
-    state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
-    state.setdefault("pairs", {})
 
-    pairs = build_pairs(cfg)
-    # '결과 없음' 기록은 이미 지난 출발일이나 오래된 것은 지운다
-    cutoff = (today - timedelta(days=cfg.get("seen_lookback_days", 45))).isoformat()
-    state["empty_seen"] = {k: v for k, v in state.get("empty_seen", {}).items()
-                           if k.split("|")[2:3] and k.split("|")[2] >= today.isoformat() and v[:10] >= cutoff}
-    seen, leg_seen = ({}, {}) if summary_only else load_last_seen(
-        data_dir, today, cfg.get("seen_lookback_days", 45), state)
-    tasks = [] if summary_only else plan_tasks(cfg, pairs, state, today, seen, now_kst)
-    print(f"전체 조합 {len(pairs)}개 중 이번 조회 {len(tasks)}건 (제외된 조합 제외)")
-
+def collect(cfg: dict, state: dict, pairs: list, today: date, stamp: str, t0: float, tasks: list, blocks: list) -> dict:
+    """주어진 왕복 조회 목록(tasks)과 편도 구간(blocks)을 실제로 조회해 결과를 돌려준다."""
+    holidays, need = set(cfg.get("holidays", [])), cfg.get("min_nonwork_days", 2)
+    delta: dict = {}  # 노선별로 이번에 성공(ok)/결과없음(empty)이 몇 번이었는지
+    done = 0
     rows, counts = [], {"ok": 0, "empty": 0, "error": 0}
     consecutive_errors, aborted = 0, False
     for i, t in enumerate(tasks, 1):
         if (time.time() - t0) / 60 > cfg.get("max_minutes", 100):
             print("시간 예산을 모두 사용해 여기서 마무리합니다.")
             break
+        done = i
         key = f"{t['origin']}-{t['dest']}"
         st = state["pairs"].setdefault(key, {"empty": 0, "ok": 0, "skip_until": ""})
         if st.get("skip_until", "") >= today.isoformat():
@@ -499,6 +505,7 @@ def main() -> int:
             consecutive_errors = 0
             st["ok"] += 1
             st["empty"] = 0
+            delta.setdefault(key, {"ok": 0, "empty": 0})["ok"] += 1
             first, last = best.flights[0], best.flights[-1]
             rows.append({
                 "collected_at": stamp, "region": t["region"], "origin": t["origin"],
@@ -511,6 +518,7 @@ def main() -> int:
         elif status == "empty":
             consecutive_errors = 0
             st["empty"] += 1
+            delta.setdefault(key, {"ok": 0, "empty": 0})["empty"] += 1
             state["empty_seen"][f"{t['origin']}|{t['dest']}|{t['depart'].isoformat()}|{t['nights']}"] = stamp
             limit = cfg.get("empty_limit_new", 5) if st["ok"] == 0 else cfg.get("empty_limit_known", 15)
             if st["empty"] >= limit:
@@ -530,7 +538,6 @@ def main() -> int:
     # 편도 조합: 같은 시각에 조회한 가는 편·오는 편을 짝지어 "왕복 일정"으로 만든다.
     # (항공사를 섞은 조합은 왕복 검색에 나오지 않을 수 있어, 따로 모아 비교한다.)
     combo_n = 0
-    blocks = [] if summary_only else plan_legs(cfg, pairs, state, today, leg_seen)
     print(f"편도 조합용 구간 {len(blocks)}개 조회 시작")
     leg_errors, leg_aborted = 0, False
     for blk in blocks:
@@ -557,10 +564,12 @@ def main() -> int:
                 leg_errors = 0
                 st["ok"] += 1
                 st["empty"] = 0
+                delta.setdefault(key, {"ok": 0, "empty": 0})["ok"] += 1
                 store[d] = best
             elif status == "empty":
                 leg_errors = 0
                 st["empty"] += 1
+                delta.setdefault(key, {"ok": 0, "empty": 0})["empty"] += 1
                 limit = cfg.get("empty_limit_new", 5) if st["ok"] == 0 else cfg.get("empty_limit_known", 15)
                 if st["empty"] >= limit:
                     st["skip_until"] = (today + timedelta(days=cfg.get("skip_days", 14))).isoformat()
@@ -592,6 +601,13 @@ def main() -> int:
                 combo_n += 1
     print(f"편도 조합 {combo_n}건 생성")
 
+    return {"rows": rows, "counts": counts, "aborted": aborted or leg_aborted, "combo_n": combo_n,
+            "delta": delta, "empty_seen": state.get("empty_seen", {}), "planned": len(tasks), "done": done}
+
+
+def finalize(cfg: dict, data_dir: Path, state: dict, state_path: Path, pairs: list, today: date, stamp: str,
+             rows: list, counts: dict, aborted: bool, combo_n: int, t0: float) -> int:
+    """조회 결과를 저장하고, 기준선을 계산해 알림과 요약 파일을 만든다."""
     # 저장
     month_file = data_dir / f"prices-{today.year}-{today.month:02d}.csv"
     append_csv(month_file, PRICE_FIELDS, rows)
@@ -679,6 +695,143 @@ def main() -> int:
     print(f"완료: 저장 {len(rows)}건(편도 조합 {combo_n}건 포함) / 결과없음 {counts['empty']}건 / 오류 {counts['error']}건 / "
           f"새 알림 {len(new_deals)}건 / 소요 {(time.time() - t0) / 60:.1f}분")
     return 1 if (aborted and not rows) or (not rows and counts["error"] and not counts["empty"]) else 0
+
+
+def _arg(argv: list, name: str, default=None):
+    if name in argv:
+        i = argv.index(name)
+        if i + 1 < len(argv):
+            return argv[i + 1]
+    return default
+
+
+def _load_state(data_dir: Path):
+    state_path = data_dir / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+    state.setdefault("pairs", {})
+    return state, state_path
+
+
+def collect_main(argv: list) -> int:
+    """조회 담당. --out 파일을 주면 결과를 파일로만 저장하고(분산 실행용), 안 주면 이어서 저장·알림까지 한다."""
+    summary_only = "--summary-only" in argv  # 조회 없이 요약 파일만 다시 만들 때
+    shard, nshards = int(_arg(argv, "--shard", "0")), int(_arg(argv, "--shards", "1"))
+    out = _arg(argv, "--out")
+    t0 = time.time()
+    cfg = json.loads((ROOT / "routes.json").read_text(encoding="utf-8"))
+    data_dir = ROOT / "data"
+    now_kst = datetime.now(KST)
+    today = date.fromisoformat(_arg(argv, "--date")) if _arg(argv, "--date") else now_kst.date()
+    stamp = now_kst.strftime("%Y-%m-%d %H:%M")
+    state, state_path = _load_state(data_dir)
+
+    pairs = build_pairs(cfg)
+    # '결과 없음' 기록은 이미 지난 출발일이나 오래된 것은 지운다
+    cutoff = (today - timedelta(days=cfg.get("seen_lookback_days", 45))).isoformat()
+    state["empty_seen"] = {k: v for k, v in state.get("empty_seen", {}).items()
+                           if k.split("|")[2:3] and k.split("|")[2] >= today.isoformat() and v[:10] >= cutoff}
+    tasks, blocks = [], []
+    if not summary_only:
+        seen, leg_seen = load_last_seen(data_dir, today, cfg.get("seen_lookback_days", 45), state)
+        if cfg.get("full_sweep"):
+            # 전수 조회: 모든 작업이 같은 목록을 만들도록 시드를 고정하고, 자기 몫만 가져간다.
+            tasks = plan_full(cfg, pairs, state, today)[shard::nshards]
+            random.seed(f"{today.isoformat()}-legs")
+            blocks = plan_legs(cfg, pairs, state, today, leg_seen)[shard::nshards]
+            random.seed()
+            random.shuffle(tasks)
+        else:
+            tasks = plan_tasks(cfg, pairs, state, today, seen, now_kst)
+            blocks = plan_legs(cfg, pairs, state, today, leg_seen)
+    print(f"[작업 {shard + 1}/{nshards}] 전체 조합 {len(pairs)}개 중 이번 조회 {len(tasks)}건 (제외된 조합 제외)")
+
+    res = collect(cfg, state, pairs, today, stamp, t0, tasks, blocks)
+    if out:
+        Path(out).write_text(json.dumps({
+            "shard": shard, "shards": nshards, "stamp": stamp, **res,
+        }, ensure_ascii=False), encoding="utf-8")
+        print(f"[작업 {shard + 1}/{nshards}] 저장 {len(res['rows'])}건(편도 조합 {res['combo_n']}건 포함) / "
+              f"결과없음 {res['counts']['empty']}건 / 오류 {res['counts']['error']}건 / 소요 {(time.time() - t0) / 60:.1f}분")
+        return 1 if (res["aborted"] and not res["rows"]) else 0
+    return finalize(cfg, data_dir, state, state_path, pairs, today, stamp,
+                    res["rows"], res["counts"], res["aborted"], res["combo_n"], t0)
+
+
+def merge_main(argv: list) -> int:
+    """분산 조회 결과(shard 파일들)를 합쳐 저장하고 알림·요약을 만든다."""
+    import glob
+    t0 = time.time()
+    cfg = json.loads((ROOT / "routes.json").read_text(encoding="utf-8"))
+    data_dir = ROOT / "data"
+    now_kst = datetime.now(KST)
+    today = date.fromisoformat(_arg(argv, "--date")) if _arg(argv, "--date") else now_kst.date()
+    stamp = now_kst.strftime("%Y-%m-%d %H:%M")
+    expect = int(_arg(argv, "--expect", "0") or 0)
+    state, state_path = _load_state(data_dir)
+    pairs = build_pairs(cfg)
+
+    skip_opts = {"--date", "--expect"}
+    names_, i = [], argv.index("--merge") + 1
+    while i < len(argv):
+        if argv[i] in skip_opts:
+            i += 2
+            continue
+        names_.append(argv[i])
+        i += 1
+    files = sorted({f for pat in names_ for f in glob.glob(pat)})
+    results = []
+    for f in files:
+        try:
+            results.append(json.loads(Path(f).read_text(encoding="utf-8")))
+        except (OSError, ValueError) as e:
+            print(f"결과 파일을 읽지 못했습니다: {f} ({e})", file=sys.stderr)
+    if not results:
+        print("합칠 조회 결과가 하나도 없습니다.", file=sys.stderr)
+        send_telegram("⚠ 항공권 조회 결과가 하나도 저장되지 않았습니다. GitHub Actions 로그를 확인해 주세요.")
+        return 1
+
+    rows, counts = [], {"ok": 0, "empty": 0, "error": 0}
+    agg, combo_n, aborted_n, short_n = {}, 0, 0, 0
+    for r in results:
+        rows.extend(r["rows"])
+        for k in counts:
+            counts[k] += r["counts"].get(k, 0)
+        combo_n += r.get("combo_n", 0)
+        for key, dl in r.get("delta", {}).items():
+            a = agg.setdefault(key, {"ok": 0, "empty": 0})
+            a["ok"] += dl["ok"]
+            a["empty"] += dl["empty"]
+        state.setdefault("empty_seen", {}).update(r.get("empty_seen", {}))
+        aborted_n += 1 if r.get("aborted") else 0
+        short_n += 1 if r.get("done", 0) < r.get("planned", 0) else 0
+    # 노선 상태 반영: 한 번이라도 성공하면 정상, 성공 없이 결과없음만 쌓이면 일정 기간 제외
+    for key, a in agg.items():
+        st = state["pairs"].setdefault(key, {"empty": 0, "ok": 0, "skip_until": ""})
+        if a["ok"] > 0:
+            st["ok"] += a["ok"]
+            st["empty"] = 0
+        else:
+            st["empty"] += a["empty"]
+            limit = cfg.get("empty_limit_new", 5) if st["ok"] == 0 else cfg.get("empty_limit_known", 15)
+            if st["empty"] >= limit:
+                st["skip_until"] = (today + timedelta(days=cfg.get("skip_days", 14))).isoformat()
+                st["empty"] = 0
+                print(f"  {key}: 결과가 계속 없어 {cfg.get('skip_days', 14)}일간 조회에서 제외")
+    total = max([expect] + [r.get("shards", 1) for r in results])
+    if len(results) < total or aborted_n or short_n:
+        msg = (f"⚠ 항공권 조회가 일부만 끝났습니다. 결과 {len(results)}/{total}개 작업 반영, "
+               f"중단 {aborted_n}개, 시간 부족 {short_n}개. 차단 가능성이 있으니 Actions 로그를 확인해 주세요.")
+        print(msg, file=sys.stderr)
+        send_telegram(msg)
+    print(f"합치기: 작업 {len(results)}/{total}개, 왕복·조합 {len(rows)}건")
+    return finalize(cfg, data_dir, state, state_path, pairs, today, stamp, rows, counts, aborted_n > 0, combo_n, t0)
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if "--merge" in argv:
+        return merge_main(argv)
+    return collect_main(argv)
 
 
 if __name__ == "__main__":
