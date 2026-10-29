@@ -1,4 +1,0 @@
-﻿collected_at,route,origin,destination,depart_date,return_date,price_krw,airlines,stops,depart_time,arrive_time,duration_min
-2026-10-28 15:06,서울-도쿄 편도,ICN,NRT,2026-12-10,,162000,ZIPAIR Tokyo,0,13:05,15:30,145
-2026-10-28 15:06,서울-도쿄 편도,ICN,NRT,2026-12-11,,162000,ZIPAIR Tokyo,0,13:05,15:30,145
-2026-10-28 15:06,서울-오사카 왕복,ICN,KIX,2027-01-15,2027-01-19,314700,진에어,0,20:40,22:25,105
