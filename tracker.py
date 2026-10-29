@@ -62,6 +62,12 @@ ORIGIN_NAMES = {"ICN": "인천", "GMP": "김포"}
 
 
 # ---------- 유틸 ----------
+def fmt_day(iso: str) -> str:
+    """'2026-11-21' -> '11/21(토)'"""
+    d = date.fromisoformat(iso)
+    return f"{d.month}/{d.day}({'월화수목금토일'[d.weekday()]})"
+
+
 def fmt_time(t) -> str:
     """[8] 처럼 분이 생략되거나 None이 섞인 시간 표기도 처리."""
     vals = list(getattr(t, "time", None) or [])
@@ -401,7 +407,7 @@ def main() -> int:
     append_csv(deals_path, DEAL_FIELDS, new_deals)
     for d in new_deals[:10]:
         msg = (f"✈ {d['origin']}→{d['destination']} {d['dest_name']} "
-               f"{d['depart_date']}~{d['return_date']}({d['nights']}박, 연차 {d['leave']}일) {d['price_krw']:,}원 "
+               f"{fmt_day(d['depart_date'])}~{fmt_day(d['return_date'])} ({d['nights']}박, 연차 {d['leave']}일) {d['price_krw']:,}원 "
                f"({d['tier']} 평소 중앙값 {d['median_krw']:,}원 대비 -{d['discount_pct']}%) {d['airlines']} {d['depart_time']}→{d['arrive_time']}")
         print(msg)
         send_telegram(msg)
