@@ -256,6 +256,9 @@ footer a{color:inherit}
     return null;
   }
 
+  // 받침 유무에 따라 '이/가'를 고른다(한글이 아니면 '가').
+  const ga = (w) => { const c = (w || '').trim().slice(-1).charCodeAt(0); return c >= 0xAC00 && c <= 0xD7A3 && (c - 0xAC00) % 28 ? '이' : '가'; };
+
   const pick = (r, ...keys) => { for (const k of keys) if (r[k] !== undefined && r[k] !== '') return r[k]; return ''; };
 
   // 새 형식(한글 열 이름)과 예전 형식(영문 열 이름)을 모두 읽는다.
@@ -366,7 +369,7 @@ footer a{color:inherit}
     const lead = $('#lead');
     if (best) {
       lead.hidden = false;
-      lead.innerHTML = `<p><strong>${esc(best.originName)} → ${esc(best.destName)}</strong>가 같은 유형 항공사의 중앙값보다 가장 많이 쌌습니다. ` +
+      lead.innerHTML = `<p><strong>${esc(best.originName)} → ${esc(best.destName)}</strong>${ga(best.destName)} 같은 유형 항공사의 중앙값보다 가장 많이 쌌습니다. ` +
         `${esc(md(best.dep))}–${esc(md(best.ret))}${best.nights !== '' ? `(${best.nights}박)` : ''} 왕복 <strong>${won(best.min)}</strong>, ` +
         `중앙값 ${won(best.median)}보다 <strong>${best.discount}%</strong> 낮습니다. <span class="muted">${esc(best.updated ? `${best.updated.slice(5)} 갱신` : '')}</span></p>`;
     } else lead.hidden = true;
