@@ -143,17 +143,20 @@ footer a{color:inherit}
   .deals li{grid-template-columns:1fr auto; gap:2px 12px}
   .deals .when{grid-column:1 / -1}
 }
+.by{margin:4px 0 0;font-size:13px;color:var(--muted,#6b7280)}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <h1>항공권 최저가 현황</h1>
+    <p class="by">제작 dochifree</p>
     <p class="sub">인천·김포에서 출발하는 일본·중국·동남아 직항 왕복 항공권을 노선별로 모아, 평소 가격에 비해 얼마나 싼 가격이 나왔는지 보여 줍니다.</p>
     <dl class="basis">
       <div><dt>가격</dt><dd>왕복 검색 결과, 성인 1명, 이코노미</dd></div>
       <div><dt>항공편</dt><dd>직항만</dd></div>
       <div><dt>수집 방식</dt><dd>내일부터 약 4개월 안의 출발일을 무작위로 조회</dd></div>
+      <div><dt>연차 계산</dt><dd>출발일~귀국일 중 평일(공휴일 제외)의 수</dd></div>
       <div><dt>평소 가격</dt><dd>최근 60일, 같은 노선·같은 항공사 유형(저비용/대형)끼리의 중앙값</dd></div>
     </dl>
   </header>
@@ -164,8 +167,10 @@ footer a{color:inherit}
     <div class="group"><span id="lb-region">지역</span><div class="seg" id="seg-region" role="group" aria-labelledby="lb-region"></div></div>
     <div class="group"><span id="lb-origin">출발</span><div class="seg" id="seg-origin" role="group" aria-labelledby="lb-origin"></div></div>
     <label class="field"><span>도착지 검색</span><input id="q" type="search" placeholder="예: 오사카, BKK" autocomplete="off"></label>
+    <label class="field"><span>몇 박</span><select id="nights"><option value="전체">전체</option></select></label>
+    <label class="field"><span>연차 최대</span><select id="leave"><option value="전체">제한 없음</option></select></label>
     <label class="field"><span>표본이 최소</span>
-      <select id="min"><option value="1">1건 이상</option><option value="5">5건 이상</option><option value="8" selected>8건 이상</option><option value="12">12건 이상</option><option value="15">15건 이상</option></select>
+      <select id="min"><option value="1">1건 이상</option><option value="3">3건 이상</option><option value="5" selected>5건 이상</option><option value="8">8건 이상</option><option value="12">12건 이상</option></select>
     </label>
     <label class="field"><span>정렬</span>
       <select id="sort">
@@ -211,7 +216,7 @@ footer a{color:inherit}
     </ul>
   </details>
 
-  <footer>원본 파일은 <a href="https://github.com/dochifree/flight-tracker/tree/main/data">저장소의 data 폴더</a>에 있습니다.</footer>
+  <footer>제작: <a href="https://github.com/dochifree">dochifree</a> · 원본 파일은 <a href="https://github.com/dochifree/flight-tracker/tree/main/data">저장소의 data 폴더</a>에 있습니다.</footer>
 </div>
 
 <script>
@@ -283,6 +288,7 @@ footer a{color:inherit}
       discount: median ? Math.round((1 - min / median) * 100) : 0,
       nights, dep, ret,
       tier: pick(r, '항공사 유형'),
+      leave: pick(r, '최저가 연차(일)') === '' ? null : Number(pick(r, '최저가 연차(일)')),
       airline: pick(r, '최저가 항공사', 'min_airlines'),
       seen: pick(r, '최저가 확인일'),
       recent: rec === '' ? null : Number(rec),
@@ -299,8 +305,26 @@ footer a{color:inherit}
     };
   }
 
-  const state = { region: '전체', origin: '전체', q: '', min: 8, sort: 'discount', dir: null };
-  let ROWS = [], DEALS = [], dealsShown = 15;
+  const state = { region: '전체', origin: '전체', q: '', min: 5, sort: 'discount', dir: null, nights: '전체', leave: '2' };
+  let ROWS = [], ALL = [], DEALS = [], dealsShown = 15, HAS_OFFERS = false;
+
+  // 박수·연차 조건에 맞는 일정 중에서 노선·항공사 유형별 최저가 한 줄만 고른다.
+  function rebuild() {
+    if (!HAS_OFFERS) { ROWS = ALL; return; }
+    const best = new Map();
+    for (const r of ALL) {
+      if (state.nights !== '전체' && String(r.nights) !== state.nights) continue;
+      if (state.leave !== '전체' && (r.leave === null || r.leave > Number(state.leave))) continue;
+      const k = r.route + '|' + r.tier;
+      const cur = best.get(k);
+      if (!cur) best.set(k, { ...r }); else {
+        const recents = [cur.recent, r.recent].filter(v => v !== null);
+        const rec = recents.length ? Math.min(...recents) : null;
+        if (r.min < cur.min) best.set(k, { ...r, recent: rec }); else cur.recent = rec;
+      }
+    }
+    ROWS = [...best.values()];
+  }
 
   const sorters = {
     discount: [(a, b) => b.discount - a.discount || a.min - b.min, 'descending'],
@@ -345,15 +369,16 @@ footer a{color:inherit}
   }
 
   function render() {
+    rebuild();
     const list = visible();
-    $('#count').textContent = `노선 ${list.length}개 표시 (전체 ${ROWS.length}개)`;
+    $('#count').textContent = `노선 ${list.length}개 표시 (조건에 맞는 일정이 있는 노선 ${ROWS.length}개)`;
     document.querySelectorAll('thead th[data-sort]').forEach(th => {
       th.setAttribute('aria-sort', th.dataset.sort === state.sort ? sorters[state.sort][1] : 'none');
     });
     $('#rows').innerHTML = list.length ? list.map(r => {
       const cls = r.discount >= 30 ? 'hi' : r.discount >= 15 ? 'mid' : '';
       const sched = r.dep ? `${md(r.dep)} → ${md(r.ret)}` : '–';
-      const sub = [r.nights !== '' ? `${r.nights}박` : '', r.airline].filter(Boolean).join(', ');
+      const sub = [r.nights !== '' ? `${r.nights}박` : '', r.leave !== null && r.leave !== undefined ? `연차 ${r.leave}일` : '', r.airline].filter(Boolean).join(', ');
       return `<tr>
         <td class="c-dest"><b>${esc(r.destName)}</b><i class="chip">${esc(r.region)}</i><small>${esc(r.originName)} 출발${r.tier ? ` · ${esc(r.tier)}` : ''}</small></td>
         <td class="c-tape">${tape(r)}<small>중앙값 ${won(r.median)}</small></td>
@@ -394,21 +419,38 @@ footer a{color:inherit}
   }
 
   async function init() {
-    const [s, d] = await Promise.all([load('summary.csv'), load('deals.csv')]);
+    const [o, s0, d] = await Promise.all([load('offers.csv'), load('summary.csv'), load('deals.csv')]);
+    const s = o || s0;
     if (!s) {
       $('#tablewrap').outerHTML = `<p class="empty">요약 파일(data/summary.csv)을 불러오지 못했습니다. 저장소의 data 폴더에 summary.csv가 있는지 확인하고, 잠시 뒤 새로고침하세요.</p>`;
       $('#count').textContent = '';
       $('#deals').innerHTML = '';
       return;
     }
-    ROWS = parseCSV(s.text).map(normSummary).filter(r => r.min > 0 && r.median > 0);
+    ALL = parseCSV(s.text).map(normSummary).filter(r => r.min > 0 && r.median > 0);
+    HAS_OFFERS = !!o && ALL.some(r => r.leave !== null);
+    if (HAS_OFFERS) {
+      const ns = [...new Set(ALL.map(r => String(r.nights)).filter(v => v && v !== 'NaN'))].sort((a, b) => a - b);
+      $('#nights').innerHTML = '<option value="전체">전체</option>' + ns.map(v => `<option value="${v}">${v}박</option>`).join('');
+      const mx = Math.max(...ALL.map(r => r.leave ?? 0));
+      let ls = '<option value="전체">제한 없음</option>';
+      for (let i = 0; i <= mx; i++) ls += `<option value="${i}">${i}일 이하</option>`;
+      $('#leave').innerHTML = ls;
+      if (state.leave !== '전체' && Number(state.leave) > mx) state.leave = String(mx);
+      $('#leave').value = state.leave;
+      $('#nights').onchange = (e) => { state.nights = e.target.value; render(); };
+      $('#leave').onchange = (e) => { state.leave = e.target.value; render(); };
+    } else {
+      for (const id of ['#nights', '#leave']) { $(id).disabled = true; }
+      state.leave = '전체';
+    }
     DEALS = d ? parseCSV(d.text).map(normDeal).sort((a, b) => (b.at || '').localeCompare(a.at || '') || b.disc - a.disc) : [];
     if (s.kind === 'copy') {
       const n = $('#src'); n.hidden = false;
       n.textContent = '사이트에 저장된 사본을 표시 중입니다. 최신 값이 아닐 수 있어요. 잠시 뒤 새로고침해 보세요.';
     }
-    seg('#seg-region', 'region', [...new Set(ROWS.map(r => r.region).filter(Boolean))]);
-    seg('#seg-origin', 'origin', [...new Set(ROWS.map(r => r.originName).filter(Boolean))]);
+    seg('#seg-region', 'region', [...new Set(ALL.map(r => r.region).filter(Boolean))]);
+    seg('#seg-origin', 'origin', [...new Set(ALL.map(r => r.originName).filter(Boolean))]);
     $('#q').oninput = (e) => { state.q = e.target.value; render(); };
     $('#min').onchange = (e) => { state.min = Number(e.target.value); render(); };
     $('#sort').onchange = (e) => { state.sort = e.target.value; render(); };
