@@ -36,10 +36,28 @@ DEAL_FIELDS = [
     "collected_at", "region", "dest_name", "origin", "destination", "depart_date", "return_date",
     "nights", "price_krw", "median_krw", "discount_pct", "airlines", "depart_time", "arrive_time",
 ]
-SUMMARY_FIELDS = [
-    "origin", "destination", "dest_name", "region", "samples", "median_krw",
-    "min_krw", "min_depart_date", "min_return_date", "min_airlines", "updated_at",
+# summary.csv: (내부 키, 화면에 보이는 열 이름). 모든 가격은 왕복 검색 결과의 가격입니다.
+SUMMARY_COLUMNS = [
+    ("region", "지역"),
+    ("origin_name", "출발"),
+    ("dest_name", "도착"),
+    ("route", "구간"),
+    ("tier", "항공사 유형"),
+    ("samples", "표본수"),
+    ("median_krw", "중앙값 왕복(원)"),
+    ("min_krw", "최저가 왕복(원)"),
+    ("discount_pct", "최저가 할인율(%)"),
+    ("min_nights", "최저가 박수"),
+    ("min_depart_date", "최저가 출발일"),
+    ("min_return_date", "최저가 귀국일"),
+    ("min_airlines", "최저가 항공사"),
+    ("min_stops", "경유 횟수"),
+    ("min_times", "가는편 시간"),
+    ("min_seen", "최저가 확인일"),
+    ("recent7_min_krw", "최근7일 최저가(원)"),
+    ("updated_at", "갱신시각"),
 ]
+ORIGIN_NAMES = {"ICN": "인천", "GMP": "김포"}
 
 
 # ---------- 유틸 ----------
@@ -186,7 +204,43 @@ def load_recent_prices(data_dir: Path, today: date, lookback_days: int) -> list:
     return rows
 
 
+def carrier_group(airlines: str, groups: dict) -> str:
+    """항공사 이름으로 비교 그룹을 정한다(저비용/대형). 목록에 없으면 그 항공사끼리만 비교한다."""
+    first = (airlines or "").split("/")[0].strip()
+    for label, keywords in groups.items():
+        if any(k.lower() in first.lower() for k in keywords):
+            return label
+    return first or "미상"
+
+
+def build_summary(by_pair: dict, names: dict, today: date, stamp: str) -> list:
+    """노선x항공사유형별 요약. 중앙값 대비 최저가 할인율이 큰 줄이 맨 위로 오도록 정렬."""
+    recent_cut = (today - timedelta(days=7)).isoformat()
+    out = []
+    for (o, d, tier), lst in by_pair.items():
+        cheapest = min(lst, key=lambda s: s["price_krw"])
+        med = int(statistics.median(s["price_krw"] for s in lst))
+        recent = [s["price_krw"] for s in lst if s["collected_at"][:10] >= recent_cut]
+        nm, rg = names.get((o, d), (d, ""))
+        out.append({
+            "region": rg, "origin_name": ORIGIN_NAMES.get(o, o), "dest_name": nm,
+            "route": f"{o}→{d}", "tier": tier, "samples": len(lst), "median_krw": med,
+            "min_krw": cheapest["price_krw"],
+            "discount_pct": round((1 - cheapest["price_krw"] / med) * 100) if med else 0,
+            "min_nights": cheapest.get("nights", ""),
+            "min_depart_date": cheapest["depart_date"], "min_return_date": cheapest["return_date"],
+            "min_airlines": cheapest["airlines"], "min_stops": cheapest.get("stops", ""),
+            "min_times": f"{cheapest.get('depart_time', '')}→{cheapest.get('arrive_time', '')}",
+            "min_seen": cheapest["collected_at"][:10],
+            "recent7_min_krw": min(recent) if recent else "",
+            "updated_at": stamp,
+        })
+    out.sort(key=lambda r: (-r["discount_pct"], r["min_krw"]))
+    return out
+
+
 def main() -> int:
+    summary_only = "--summary-only" in sys.argv  # 조회 없이 요약 파일만 다시 만들 때
     t0 = time.time()
     cfg = json.loads((ROOT / "routes.json").read_text(encoding="utf-8"))
     data_dir = ROOT / "data"
@@ -199,7 +253,7 @@ def main() -> int:
     state.setdefault("pairs", {})
 
     pairs = build_pairs(cfg)
-    tasks = plan_tasks(cfg, pairs, state, today)
+    tasks = [] if summary_only else plan_tasks(cfg, pairs, state, today)
     print(f"전체 조합 {len(pairs)}개 중 이번 조회 {len(tasks)}건 (제외된 조합 제외)")
 
     rows, counts = [], {"ok": 0, "empty": 0, "error": 0}
@@ -255,9 +309,11 @@ def main() -> int:
     # 기준선(중앙값) 계산 및 알림
     acfg = cfg.get("alert", {})
     recent = load_recent_prices(data_dir, today, acfg.get("lookback_days", 60))
-    by_pair: dict = {}
+    groups = cfg.get("carrier_groups", {})
+    by_pair: dict = {}  # (출발, 도착, 항공사 유형) 별로 따로 모아 같은 유형끼리만 비교
     for r in recent:
-        by_pair.setdefault((r["origin"], r["destination"]), []).append(r)
+        r["tier"] = carrier_group(r.get("airlines", ""), groups)
+        by_pair.setdefault((r["origin"], r["destination"], r["tier"]), []).append(r)
 
     names = {(p["origin"], p["dest"]): (p["name"], p["region"]) for p in pairs}
     deals_path = data_dir / "deals.csv"
@@ -267,8 +323,9 @@ def main() -> int:
 
     new_deals = []
     for r in rows:
-        samples = by_pair.get((r["origin"], r["destination"]), [])
-        if len(samples) < acfg.get("min_samples", 12):
+        tier = carrier_group(r["airlines"], groups)
+        samples = by_pair.get((r["origin"], r["destination"], tier), [])
+        if len(samples) < acfg.get("min_samples", 8):
             continue
         med = statistics.median(s["price_krw"] for s in samples)
         if r["price_krw"] > med * acfg.get("ratio", 0.75):
@@ -279,7 +336,7 @@ def main() -> int:
             continue  # 이미 비슷한 가격으로 알린 건
         name = names.get((r["origin"], r["destination"]), (r["destination"], ""))[0]
         new_deals.append({
-            **r, "dest_name": name, "median_krw": int(med),
+            **r, "dest_name": name, "tier": tier, "median_krw": int(med),
             "discount_pct": round((1 - r["price_krw"] / med) * 100),
         })
         old_deals[k] = (today.isoformat(), r["price_krw"])
@@ -288,30 +345,20 @@ def main() -> int:
     for d in new_deals[:10]:
         msg = (f"✈ {d['origin']}→{d['destination']} {d['dest_name']} "
                f"{d['depart_date']}~{d['return_date']}({d['nights']}박) {d['price_krw']:,}원 "
-               f"(평소 중앙값 {d['median_krw']:,}원 대비 -{d['discount_pct']}%) {d['airlines']} {d['depart_time']}→{d['arrive_time']}")
+               f"({d['tier']} 평소 중앙값 {d['median_krw']:,}원 대비 -{d['discount_pct']}%) {d['airlines']} {d['depart_time']}→{d['arrive_time']}")
         print(msg)
         send_telegram(msg)
     if len(new_deals) > 10:
         send_telegram(f"그 외 {len(new_deals) - 10}건은 data/deals.csv에서 확인하세요.")
 
-    # 노선별 요약
-    summary = []
-    for (o, d), lst in sorted(by_pair.items()):
-        cheapest = min(lst, key=lambda s: s["price_krw"])
-        nm, rg = names.get((o, d), (d, ""))
-        summary.append({
-            "origin": o, "destination": d, "dest_name": nm, "region": rg, "samples": len(lst),
-            "median_krw": int(statistics.median(s["price_krw"] for s in lst)),
-            "min_krw": cheapest["price_krw"], "min_depart_date": cheapest["depart_date"],
-            "min_return_date": cheapest["return_date"], "min_airlines": cheapest["airlines"],
-            "updated_at": stamp,
-        })
-    summary_path = data_dir / "summary.csv"
+    # 노선별 요약 (할인율 큰 순)
+    summary = build_summary(by_pair, names, today, stamp)
     if summary:
-        with summary_path.open("w", encoding="utf-8-sig", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=SUMMARY_FIELDS)
-            w.writeheader()
-            w.writerows(summary)
+        with (data_dir / "summary.csv").open("w", encoding="utf-8-sig", newline="") as f:
+            w = csv.writer(f)
+            w.writerow([h for _, h in SUMMARY_COLUMNS])
+            for r in summary:
+                w.writerow([r.get(k, "") for k, _ in SUMMARY_COLUMNS])
 
     print(f"완료: 저장 {len(rows)}건 / 결과없음 {counts['empty']}건 / 오류 {counts['error']}건 / "
           f"새 알림 {len(new_deals)}건 / 소요 {(time.time() - t0) / 60:.1f}분")
@@ -320,4 +367,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
