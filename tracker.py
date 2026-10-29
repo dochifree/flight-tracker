@@ -99,7 +99,7 @@ def send_telegram(text: str) -> None:
     token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
     if not (token and chat):
         return
-    data = urllib.parse.urlencode({"chat_id": chat, "text": text}).encode()
+    data = urllib.parse.urlencode({"chat_id": chat, "text": text, "disable_web_page_preview": "true"}).encode()
     try:
         urllib.request.urlopen(f"https://api.telegram.org/bot{token}/sendMessage", data=data, timeout=15)
     except Exception as e:
@@ -126,8 +126,37 @@ def read_csv(path: Path) -> list:
 
 
 # ---------- 조회 ----------
+def _fetch_best(q):
+    """조회해서 가장 싼 항목을 고른다. 반환: (상태, 최저가 항목). 상태는 ok / empty / error."""
+    results = None
+    for attempt in range(2):
+        try:
+            results = get_flights(q)
+            break
+        except FlightsNotFound:
+            return "empty", None
+        except PARSE_ERRORS as e:  # 응답 구조를 읽지 못함: 재시도해도 같음
+            print(f"  응답 해석 실패: {type(e).__name__}: {e}", file=sys.stderr)
+            debug_response(q)
+            return "error", None
+        except Exception as e:  # 네트워크 오류 등
+            print(f"  재시도 {attempt + 1}/2: {type(e).__name__}: {e}", file=sys.stderr)
+            time.sleep(5 * (attempt + 1))
+    if results is None:
+        return "error", None
+    diag = getattr(results, "diagnostics", None)
+    if diag is not None and getattr(diag, "status", "ok") in ("blocked", "http_error"):
+        print(f"  진단: {diag}", file=sys.stderr)
+        debug_response(q)
+        return "error", None
+    priced = [r for r in results if r.price and r.price > 0]
+    if not priced:
+        return "empty", None
+    return "ok", min(priced, key=lambda r: r.price)
+
+
 def search(origin: str, dest: str, depart: date, nights: int, cfg: dict):
-    """반환: (상태, 최저가 항목, 귀국일). 상태는 ok / empty / error."""
+    """왕복 조회. 반환: (상태, 최저가 항목, 귀국일)."""
     ret = depart + timedelta(days=nights)
     ms = cfg.get("max_stops")
     q = create_query(
@@ -138,31 +167,18 @@ def search(origin: str, dest: str, depart: date, nights: int, cfg: dict):
         seat="economy", trip="round-trip", passengers=Passengers(adults=1),
         language=cfg["language"], currency=cfg["currency"],
     )
-    results = None
-    for attempt in range(2):
-        try:
-            results = get_flights(q)
-            break
-        except FlightsNotFound:
-            return "empty", None, ret
-        except PARSE_ERRORS as e:  # 응답 구조를 읽지 못함: 재시도해도 같음
-            print(f"  응답 해석 실패: {type(e).__name__}: {e}", file=sys.stderr)
-            debug_response(q)
-            return "error", None, ret
-        except Exception as e:  # 네트워크 오류 등
-            print(f"  재시도 {attempt + 1}/2: {type(e).__name__}: {e}", file=sys.stderr)
-            time.sleep(5 * (attempt + 1))
-    if results is None:
-        return "error", None, ret
-    diag = getattr(results, "diagnostics", None)
-    if diag is not None and getattr(diag, "status", "ok") in ("blocked", "http_error"):
-        print(f"  진단: {diag}", file=sys.stderr)
-        debug_response(q)
-        return "error", None, ret
-    priced = [r for r in results if r.price and r.price > 0]
-    if not priced:
-        return "empty", None, ret
-    return "ok", min(priced, key=lambda r: r.price), ret
+    status, best = _fetch_best(q)
+    return status, best, ret
+
+
+def search_oneway(origin: str, dest: str, day: date, cfg: dict):
+    """편도 조회. 반환: (상태, 최저가 항목)."""
+    q = create_query(
+        flights=[FlightQuery(date=day.isoformat(), from_airport=origin, to_airport=dest, max_stops=cfg.get("max_stops"))],
+        seat="economy", trip="one-way", passengers=Passengers(adults=1),
+        language=cfg["language"], currency=cfg["currency"],
+    )
+    return _fetch_best(q)
 
 
 # ---------- 계획 ----------
@@ -217,6 +233,32 @@ def plan_tasks(cfg: dict, pairs: list, state: dict, today: date) -> list:
     return tasks[: cfg["queries_per_run"]]
 
 
+def plan_legs(cfg: dict, pairs: list, state: dict, today: date) -> list:
+    """편도 조합용 조회 계획. 노선마다 연속된 날짜 구간(block)의 가는 편·오는 편을 모두 조회한다.
+    같은 시각에 조회한 편도끼리만 짝지어 왕복 일정을 만든다."""
+    budget = cfg.get("oneway_queries_per_run", 0)
+    k = cfg.get("oneway_block_days", 10)
+    if budget <= 0:
+        return []
+    active = [p for p in pairs
+              if state["pairs"].get(f"{p['origin']}-{p['dest']}", {}).get("skip_until", "") < today.isoformat()]
+    first = today + timedelta(days=cfg["start_offset_days"])
+    k = min(k, cfg["horizon_days"])
+    n_blocks = max(0, budget // (2 * k))
+    random.shuffle(active)
+    blocks = []
+    for p in active[:n_blocks]:
+        start = first + timedelta(days=random.randint(0, cfg["horizon_days"] - k))
+        blocks.append({**p, "days": [start + timedelta(days=i) for i in range(k)]})
+    return blocks
+
+
+def google_link(origin: str, dest: str, depart: str, ret: str = "") -> str:
+    """같은 일정을 Google 항공권에서 바로 검색해 보는 링크(자연어 검색 주소)."""
+    text = f"Flights from {origin} to {dest} on {depart}" + (f" through {ret}" if ret else " one way")
+    return "https://www.google.com/travel/flights?hl=ko&curr=KRW&q=" + urllib.parse.quote(text)
+
+
 # ---------- 기준선과 알림 ----------
 def load_recent_prices(data_dir: Path, today: date, lookback_days: int) -> list:
     rows = []
@@ -238,12 +280,16 @@ def load_recent_prices(data_dir: Path, today: date, lookback_days: int) -> list:
 
 
 def carrier_group(airlines: str, groups: dict) -> str:
-    """항공사 이름으로 비교 그룹을 정한다(저비용/대형). 목록에 없으면 그 항공사끼리만 비교한다."""
-    first = (airlines or "").split("/")[0].strip()
-    for label, keywords in groups.items():
-        if any(k.lower() in first.lower() for k in keywords):
-            return label
-    return first or "미상"
+    """항공사 이름으로 비교 그룹을 정한다(저비용/대형). 목록에 없으면 그 항공사끼리만 비교한다.
+    편도 2장 조합("A+B")은 두 항공사가 같은 유형이면 그 유형, 다르면 "혼합"으로 본다."""
+    def one(name: str) -> str:
+        first = (name or "").split("/")[0].strip()
+        for label, keywords in groups.items():
+            if any(k.lower() in first.lower() for k in keywords):
+                return label
+        return first or "미상"
+    kinds = {one(part) for part in (airlines or "").split("+")}
+    return kinds.pop() if len(kinds) == 1 else "혼합"
 
 
 def _row(o, d, tier, lst, pool, names, today, stamp):
@@ -356,6 +402,65 @@ def main() -> int:
             print(f"  진행 {i}/{len(tasks)} (저장 {counts['ok']}, 결과없음 {counts['empty']}, 오류 {counts['error']})")
         time.sleep(cfg.get("pause_seconds", 2))
 
+    # 편도 조합: 같은 시각에 조회한 가는 편·오는 편을 짝지어 "왕복 일정"으로 만든다.
+    # (항공사를 섞은 조합은 왕복 검색에 나오지 않을 수 있어, 따로 모아 비교한다.)
+    combo_n = 0
+    blocks = [] if summary_only else plan_legs(cfg, pairs, state, today)
+    print(f"편도 조합용 구간 {len(blocks)}개 조회 시작")
+    leg_errors, leg_aborted = 0, False
+    for blk in blocks:
+        if leg_aborted or (time.time() - t0) / 60 > cfg.get("max_minutes", 100):
+            break
+        key = f"{blk['origin']}-{blk['dest']}"
+        st = state["pairs"].setdefault(key, {"empty": 0, "ok": 0, "skip_until": ""})
+        out, back = {}, {}
+        for d in blk["days"]:
+            for a, b, store in ((blk["origin"], blk["dest"], out), (blk["dest"], blk["origin"], back)):
+                if st.get("skip_until", "") >= today.isoformat():
+                    break
+                status, best = search_oneway(a, b, d, cfg)
+                counts[status] += 1
+                if status == "ok":
+                    leg_errors = 0
+                    st["ok"] += 1
+                    st["empty"] = 0
+                    store[d] = best
+                elif status == "empty":
+                    leg_errors = 0
+                    st["empty"] += 1
+                    limit = cfg.get("empty_limit_new", 5) if st["ok"] == 0 else cfg.get("empty_limit_known", 15)
+                    if st["empty"] >= limit:
+                        st["skip_until"] = (today + timedelta(days=cfg.get("skip_days", 14))).isoformat()
+                        st["empty"] = 0
+                        print(f"  {key}: 편도 결과가 계속 없어 {cfg.get('skip_days', 14)}일간 조회에서 제외")
+                else:
+                    leg_errors += 1
+                    if leg_errors >= cfg.get("abort_after_errors", 12):
+                        print("편도 조회 연속 오류가 많아 편도 조합 조회를 중단합니다.", file=sys.stderr)
+                        leg_aborted = True
+                        break
+                time.sleep(cfg.get("pause_seconds", 2))
+            if leg_aborted:
+                break
+        for d, o_leg in out.items():
+            for n in cfg["nights"]:
+                r_day = d + timedelta(days=n)
+                b_leg = back.get(r_day)
+                if b_leg is None:
+                    continue
+                rows.append({
+                    "collected_at": stamp, "region": blk["region"], "origin": blk["origin"],
+                    "destination": blk["dest"], "depart_date": d.isoformat(),
+                    "return_date": r_day.isoformat(), "nights": n, "price_krw": o_leg.price + b_leg.price,
+                    "airlines": "/".join(o_leg.airlines) + "+" + "/".join(b_leg.airlines),
+                    "stops": max(len(o_leg.flights) - 1, 0) + max(len(b_leg.flights) - 1, 0),
+                    "depart_time": fmt_time(o_leg.flights[0].departure),
+                    "arrive_time": fmt_time(o_leg.flights[-1].arrival),
+                    "duration_min": sum(x.duration for x in o_leg.flights) + sum(x.duration for x in b_leg.flights),
+                })
+                combo_n += 1
+    print(f"편도 조합 {combo_n}건 생성")
+
     # 저장
     month_file = data_dir / f"prices-{today.year}-{today.month:02d}.csv"
     append_csv(month_file, PRICE_FIELDS, rows)
@@ -411,9 +516,14 @@ def main() -> int:
     new_deals.sort(key=lambda d: -d["discount_pct"])
     append_csv(deals_path, DEAL_FIELDS, new_deals)
     for d in new_deals[:10]:
+        combo = "+" in d["airlines"]
+        link = (f"가는 편 {google_link(d['origin'], d['destination'], d['depart_date'])}\n"
+                f"오는 편 {google_link(d['destination'], d['origin'], d['return_date'])}") if combo \
+            else f"확인 {google_link(d['origin'], d['destination'], d['depart_date'], d['return_date'])}"
         msg = (f"✈ {d['origin']}→{d['destination']} {d['dest_name']} "
                f"{fmt_day(d['depart_date'])}~{fmt_day(d['return_date'])} ({d['nights']}박, 연차 {d['leave']}일) {d['price_krw']:,}원 "
-               f"({d['tier']} 평소 중앙값 {d['median_krw']:,}원 대비 -{d['discount_pct']}%) {d['airlines']} {d['depart_time']}→{d['arrive_time']}")
+               f"({d['tier']} 평소 중앙값 {d['median_krw']:,}원 대비 -{d['discount_pct']}%) {d['airlines']} {d['depart_time']}→{d['arrive_time']}"
+               + ("\n※ 편도 2장 조합 (각각 따로 예매)" if combo else "") + f"\n{link}")
         print(msg)
         send_telegram(msg)
     if len(new_deals) > 10:
@@ -429,7 +539,7 @@ def main() -> int:
                 for r in table:
                     w.writerow([r.get(k, "") for k, _ in SUMMARY_COLUMNS])
 
-    print(f"완료: 저장 {len(rows)}건 / 결과없음 {counts['empty']}건 / 오류 {counts['error']}건 / "
+    print(f"완료: 저장 {len(rows)}건(편도 조합 {combo_n}건 포함) / 결과없음 {counts['empty']}건 / 오류 {counts['error']}건 / "
           f"새 알림 {len(new_deals)}건 / 소요 {(time.time() - t0) / 60:.1f}분")
     return 1 if (aborted and not rows) or (not rows and counts["error"] and not counts["empty"]) else 0
 
