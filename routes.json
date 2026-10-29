@@ -5,18 +5,13 @@
     "ICN",
     "GMP"
   ],
-  "nights": [
-    2,
-    3,
-    4,
-    5
-  ],
+  "nights": [2, 3, 4, 5],
   "min_nonwork_days": 2,
   "start_offset_days": 1,
   "horizon_days": 120,
   "max_stops": 0,
-  "queries_per_run": 300,
-  "oneway_queries_per_run": 300,
+  "queries_per_run": 525,
+  "oneway_queries_per_run": 200,
   "oneway_block_days": 10,
   "pause_seconds": 2,
   "max_minutes": 100,
@@ -24,6 +19,9 @@
   "empty_limit_new": 5,
   "empty_limit_known": 15,
   "skip_days": 14,
+  "probe_per_run": 2,
+  "region_weight": {"일본": 4, "동남아": 3, "대만": 2.5},
+  "seen_lookback_days": 45,
   "alert": {
     "ratio": 0.7,
     "min_samples": 6,
@@ -69,7 +67,8 @@
       "THAI",
       "캐세이",
       "중화항공",
-      "에바항공"
+      "에바항공",
+      "스타럭스"
     ]
   },
   "destinations": {
@@ -92,36 +91,6 @@
       "TOY": "도야마",
       "KMQ": "고마쓰",
       "AOJ": "아오모리"
-    },
-    "중국": {
-      "PEK": "베이징 서우두",
-      "PKX": "베이징 다싱",
-      "PVG": "상하이 푸둥",
-      "SHA": "상하이 훙차오",
-      "CAN": "광저우",
-      "SZX": "선전",
-      "CTU": "청두 솽류",
-      "TFU": "청두 톈푸",
-      "HGH": "항저우",
-      "XIY": "시안",
-      "CKG": "충칭",
-      "TAO": "칭다오",
-      "DLC": "다롄",
-      "SHE": "선양",
-      "HRB": "하얼빈",
-      "KMG": "쿤밍",
-      "NKG": "난징",
-      "WUH": "우한",
-      "CSX": "창사",
-      "XMN": "샤먼",
-      "TSN": "톈진",
-      "SYX": "싼야",
-      "HAK": "하이커우",
-      "YNJ": "옌지",
-      "WEH": "웨이하이",
-      "YNT": "옌타이",
-      "HKG": "홍콩",
-      "MFM": "마카오"
     },
     "동남아": {
       "BKK": "방콕 수완나품",
@@ -150,6 +119,13 @@
       "SAI": "씨엠립 신공항",
       "VTE": "비엔티안",
       "RGN": "양곤"
+    },
+    "대만": {
+      "TPE": "타이베이 타오위안",
+      "TSA": "타이베이 송산",
+      "KHH": "가오슝",
+      "RMQ": "타이중",
+      "TNN": "타이난"
     }
   },
   "holidays": [
