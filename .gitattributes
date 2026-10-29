@@ -1,0 +1,3 @@
+# 조회 결과 CSV는 줄을 이어 붙이는 방식이라, 동시에 바뀌어도 두 쪽 줄을 모두 살립니다.
+data/prices-*.csv merge=union
+data/deals.csv merge=union
