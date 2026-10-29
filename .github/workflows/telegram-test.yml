@@ -1,0 +1,32 @@
+name: telegram-test
+on:
+  workflow_dispatch: {}
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 텔레그램 테스트 메시지 보내기
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN 이 등록되어 있지 않습니다. Secrets 이름을 확인하세요."
+            exit 1
+          fi
+          if [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "::error::TELEGRAM_CHAT_ID 가 등록되어 있지 않습니다. Secrets 이름을 확인하세요."
+            exit 1
+          fi
+          code=$(curl -s -o resp.json -w "%{http_code}" -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=✅ 항공권 트래커 연결 테스트입니다. 이 메시지가 보이면 알림 연결이 정상입니다.")
+          echo "HTTP 상태: $code"
+          if [ "$code" != "200" ]; then
+            python3 -c "import json; d=json.load(open('resp.json')); print('텔레그램 응답:', d.get('description'))" || cat resp.json
+            echo "::error::전송 실패. 위의 텔레그램 응답 내용을 확인하세요."
+            exit 1
+          fi
+          echo "전송 성공: 텔레그램 앱을 확인하세요."
