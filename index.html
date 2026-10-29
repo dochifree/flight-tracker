@@ -143,6 +143,8 @@ footer a{color:inherit}
   .deals li{grid-template-columns:1fr auto; gap:2px 12px}
   .deals .when{grid-column:1 / -1}
 }
+.lk a{color:var(--accent)}
+.lk a:hover{text-decoration:none}
 .by{margin:4px 0 0;font-size:13px;color:var(--muted,#6b7280)}
 </style>
 </head>
@@ -209,6 +211,8 @@ footer a{color:inherit}
     <summary>이 표를 읽는 법</summary>
     <ul>
       <li><strong>중앙값 대비 위치</strong>: 세로선이 중앙값, 큰 점이 최저가, 고리가 최근 7일 최저가입니다. 점이 세로선에서 왼쪽으로 멀수록 평소보다 싼 가격입니다.</li>
+      <li><strong>편도 2장 조합</strong>: 가는 편과 오는 편을 서로 다른(또는 같은) 항공사의 편도로 따로 사서 합친 가격입니다. 각각 따로 예매해야 하고, 한쪽이 취소·지연돼도 다른 쪽은 별개입니다. 항공사가 섞이면 비교 유형은 "혼합"으로 표시됩니다.</li>
+      <li><strong>구글에서 확인</strong>: 같은 일정을 Google 항공권에서 바로 검색하는 링크입니다. 예약 전에 가격을 다시 확인하세요.</li>
       <li><strong>최저가</strong>: 수집한 가격 중 가장 싼 값입니다. 수집한 날의 가격이라 지금은 오르거나 매진됐을 수 있으니, 예약 전에 항공사 사이트에서 다시 확인하세요.</li>
       <li><strong>중앙값</strong>: 같은 노선에서 같은 유형(저비용은 저비용끼리, 대형은 대형끼리)의 가격을 모은 가운데 값입니다. 4개월 안에서도 출발 시기(성수기·비수기)가 섞여 있어서, 비수기 날짜가 특히 싸게 보일 수 있습니다.</li>
       <li><strong>표본</strong>: 그 노선에서 모은 가격의 개수입니다. 적을수록 비교가 덜 정확합니다.</li>
@@ -273,6 +277,18 @@ footer a{color:inherit}
       if (wd !== 0 && wd !== 6 && !HOLIDAYS.has(d.toISOString().slice(0, 10))) n++;
     }
     return n;
+  }
+
+  // 같은 일정을 Google 항공권에서 바로 검색해 보는 링크
+  const gl = (o, d, dep, ret) => 'https://www.google.com/travel/flights?hl=ko&curr=KRW&q=' +
+    encodeURIComponent(`Flights from ${o} to ${d} on ${dep}` + (ret ? ` through ${ret}` : ' one way'));
+  function checkLinks(r) {
+    const [o, d] = (r.route || '').split('→');
+    if (!o || !d || !r.dep || !r.ret) return '';
+    const a = (u, label) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    return (r.airline || '').includes('+')
+      ? `${a(gl(o, d, r.dep), '가는 편 확인')} · ${a(gl(d, o, r.ret), '오는 편 확인')}`
+      : a(gl(o, d, r.dep, r.ret), '구글에서 확인');
   }
 
   const pick = (r, ...keys) => { for (const k of keys) if (r[k] !== undefined && r[k] !== '') return r[k]; return ''; };
@@ -388,13 +404,13 @@ footer a{color:inherit}
     $('#rows').innerHTML = list.length ? list.map(r => {
       const cls = r.discount >= 30 ? 'hi' : r.discount >= 15 ? 'mid' : '';
       const sched = r.dep ? `${md(r.dep)} → ${md(r.ret)}` : '–';
-      const sub = [r.nights !== '' ? `${r.nights}박` : '', r.leave !== null && r.leave !== undefined ? `연차 ${r.leave}일` : '', r.airline].filter(Boolean).join(', ');
+      const sub = [r.nights !== '' ? `${r.nights}박` : '', r.leave !== null && r.leave !== undefined ? `연차 ${r.leave}일` : '', (r.airline || '').includes('+') ? `${r.airline} (편도 2장 조합)` : r.airline].filter(Boolean).join(', ');
       return `<tr>
         <td class="c-dest"><b>${esc(r.destName)}</b><i class="chip">${esc(r.region)}</i><small>${esc(r.originName)} 출발${r.tier ? ` · ${esc(r.tier)}` : ''}</small></td>
         <td class="c-tape">${tape(r)}<small>중앙값 ${won(r.median)}</small></td>
         <td class="c-price"><span class="price">${won(r.min)}</span>${r.seen ? `<small>${esc(md(r.seen))} 확인</small>` : ''}</td>
         <td class="c-disc"><span class="badge ${cls}">−${r.discount}%</span></td>
-        <td class="c-sched">${esc(sched)}<small>${esc(sub)}</small></td>
+        <td class="c-sched">${esc(sched)}<small>${esc(sub)}</small><small class="lk">${checkLinks(r)}</small></td>
         <td class="c-recent" data-label="최근 7일 최저">${r.recent !== null ? won(r.recent) : '<span class="nil">–</span>'}</td>
         <td class="c-samp" data-label="표본">${r.samples}건</td>
       </tr>`;
