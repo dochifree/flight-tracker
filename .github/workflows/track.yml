@@ -1,7 +1,9 @@
 name: track-flights
 on:
   schedule:
-    - cron: "7 0-23/3 * * *"   # 3시간마다(한국 시간 00:07, 03:07, 06:07 … 21:07), 하루 8회
+    # 한국 시간 00:07, 06:07, 12:07, 18:07 (하루 4회). 매번 조건에 맞는 일정을 전부 조회합니다.
+    # 횟수를 바꾸려면 이 줄의 시각(UTC)만 고치세요. 예) 하루 2회: "7 3,15 * * *"
+    - cron: "7 3,9,15,21 * * *"
   workflow_dispatch: {}
 permissions:
   contents: write
@@ -9,9 +11,24 @@ concurrency:
   group: track-flights
   cancel-in-progress: false
 jobs:
-  track:
+  # 1) 오늘 날짜(한국 기준)를 정해서 모든 작업이 같은 날짜로 계획을 세우게 합니다.
+  prep:
     runs-on: ubuntu-latest
-    timeout-minutes: 130
+    outputs:
+      date: ${{ steps.d.outputs.date }}
+    steps:
+      - id: d
+        run: echo "date=$(TZ=Asia/Seoul date +%F)" >> "$GITHUB_OUTPUT"
+
+  # 2) 전체 조회를 8개 작업으로 나눠 동시에 조회합니다. (작업 수를 바꾸면 shard 목록과 --shards 숫자를 함께 바꾸세요)
+  collect:
+    needs: prep
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,7 +36,37 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - run: python tracker.py
+      - name: 조회
+        run: python tracker.py --shard ${{ matrix.shard }} --shards 8 --date ${{ needs.prep.outputs.date }} --out shard-${{ matrix.shard }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shard-${{ matrix.shard }}
+          path: shard-${{ matrix.shard }}.json
+          retention-days: 1
+          if-no-files-found: ignore
+
+  # 3) 8개 결과를 합쳐서 저장하고, 평소 가격 계산·알림·요약 파일을 만든 뒤 저장소에 올립니다.
+  finalize:
+    needs: [prep, collect]
+    if: always() && needs.prep.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: shard-*
+          merge-multiple: true
+          path: shards
+      - name: 합치기
+        run: python tracker.py --merge "shards/*.json" --date ${{ needs.prep.outputs.date }} --expect 8
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -34,7 +81,7 @@ jobs:
             exit 0
           fi
           git commit -m "data: 가격 업데이트 $(date -u +%F\ %H:%M) UTC"
-          # 조회하는 동안 다른 실행이 먼저 저장했어도 충돌 없이 합쳐서 올립니다. (최대 5번 재시도)
+          # 다른 실행이 먼저 저장했어도 충돌 없이 합쳐서 올립니다. (최대 5번 재시도)
           for i in 1 2 3 4 5; do
             git fetch origin main
             if git rebase -X theirs origin/main; then
