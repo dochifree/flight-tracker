@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>항공권 최저가 현황</title>
+<meta name="description" content="인천·김포 출발 일본·중국·동남아 직항 왕복 항공권을 노선별로 비교합니다.">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
+<style>
+:root{
+  --bg:#EEF2F6; --surface:#FFFFFF; --ink:#16202F; --muted:#596579; --line:#D5DDE7; --soft:#E8EDF4;
+  --accent:#1F5EFF; --on-accent:#FFFFFF; --accent-soft:#DCE6FF;
+  --radius:10px;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0E1522; --surface:#151F30; --ink:#E8EEF7; --muted:#9AA8BE; --line:#263149; --soft:#1B263B;
+    --accent:#6D9BFF; --on-accent:#0E1522; --accent-soft:#22345E;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font:15px/1.55 "Pretendard Variable",Pretendard,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+  font-variant-numeric:tabular-nums;
+}
+.wrap{max-width:1180px; margin:0 auto; padding:28px 16px 72px}
+h1{font-size:clamp(24px,3.6vw,32px); line-height:1.2; font-weight:760; letter-spacing:-.02em; margin:0 0 8px}
+h2{font-size:18px; font-weight:700; letter-spacing:-.01em; margin:36px 0 12px}
+.sub{color:var(--muted); max-width:64ch; margin:0}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px}
+
+/* 기준 */
+.basis{display:flex; flex-wrap:wrap; gap:10px 32px; margin:20px 0 0; padding:16px 0 0; border-top:1px solid var(--line)}
+.basis div{min-width:0}
+.basis dt{font-size:12.5px; color:var(--muted)}
+.basis dd{margin:2px 0 0; font-weight:620}
+
+/* 가장 큰 할인 */
+.lead{margin:22px 0 0; padding:16px 18px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius)}
+.lead p{margin:0; max-width:70ch}
+.lead strong{font-weight:720}
+.lead .muted{color:var(--muted)}
+
+/* 필터 */
+.controls{display:flex; flex-wrap:wrap; gap:12px 20px; align-items:end; margin:26px 0 12px}
+.group{display:flex; flex-direction:column; gap:6px}
+.group > span, .field > span{font-size:12.5px; color:var(--muted)}
+.seg{display:inline-flex; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:2px; gap:2px}
+.seg button{
+  font:inherit; color:var(--ink); background:transparent; border:0; border-radius:6px;
+  padding:6px 12px; cursor:pointer; min-height:34px;
+}
+.seg button[aria-pressed="true"]{background:var(--accent); color:var(--on-accent); font-weight:640}
+.seg button:not([aria-pressed="true"]):hover{background:var(--soft)}
+.field{display:flex; flex-direction:column; gap:6px}
+.field input,.field select{
+  font:inherit; color:var(--ink); background:var(--surface); border:1px solid var(--line);
+  border-radius:8px; padding:6px 10px; min-height:38px; min-width:0;
+}
+.field input{width:190px}
+.count{margin:0 0 10px; color:var(--muted); font-size:13.5px}
+
+/* 표 */
+.tablewrap{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden}
+table{width:100%; border-collapse:collapse}
+thead th{
+  text-align:left; font-size:12.5px; font-weight:600; color:var(--muted); white-space:nowrap;
+  padding:10px 14px; border-bottom:1px solid var(--line); background:var(--surface);
+}
+thead th button{all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:4px}
+thead th button:hover{color:var(--ink)}
+thead th button:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px}
+thead th[aria-sort="ascending"] button::after{content:"▲"; font-size:9px}
+thead th[aria-sort="descending"] button::after{content:"▼"; font-size:9px}
+thead th[aria-sort="ascending"],thead th[aria-sort="descending"]{color:var(--ink)}
+tbody td{padding:12px 14px; border-bottom:1px solid var(--soft); vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--soft)}
+td small{display:block; color:var(--muted); font-size:12.5px; line-height:1.4; margin-top:1px}
+td b{font-weight:660}
+.c-dest b{font-size:15.5px}
+.chip{display:inline-block; font-style:normal; font-size:11.5px; color:var(--muted); border:1px solid var(--line); border-radius:99px; padding:0 7px; margin-left:6px; vertical-align:1px}
+.price{font-size:17px; font-weight:720; letter-spacing:-.01em}
+.badge{display:inline-block; min-width:52px; text-align:center; font-weight:680; font-size:13.5px; padding:2px 9px; border-radius:99px; background:var(--soft); color:var(--ink)}
+.badge.mid{background:var(--accent-soft)}
+.badge.hi{background:var(--accent); color:var(--on-accent)}
+.nil{color:var(--muted)}
+
+/* 가격 위치 막대: 세로선이 중앙값, 큰 점이 최저가, 고리가 최근 7일 최저가 */
+.tape{position:relative; display:block; height:22px; min-width:150px}
+.tape::before{content:""; position:absolute; left:0; right:0; top:50%; height:2px; margin-top:-1px; background:var(--line); border-radius:2px}
+.tape i{position:absolute; top:50%}
+.tape .gap{height:4px; margin-top:-2px; background:var(--accent); opacity:.28; border-radius:2px}
+.tape .med{width:2px; height:18px; margin:-9px 0 0 -1px; background:var(--ink)}
+.tape .rec{width:15px; height:15px; margin:-7.5px 0 0 -7.5px; border:2px solid var(--accent); border-radius:50%; background:var(--surface)}
+.tape .min{width:11px; height:11px; margin:-5.5px 0 0 -5.5px; background:var(--accent); border-radius:50%}
+
+/* 알림 목록 */
+.deals{list-style:none; margin:0; padding:0; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden}
+.deals li{display:grid; grid-template-columns:130px 1.4fr 1.4fr auto auto; gap:6px 18px; align-items:center; padding:12px 14px; border-bottom:1px solid var(--soft)}
+.deals li:last-child{border-bottom:0}
+.deals .when{color:var(--muted); font-size:13px}
+.empty{padding:22px 18px; background:var(--surface); border:1px dashed var(--line); border-radius:var(--radius); color:var(--muted); margin:0}
+.more{margin-top:10px; font:inherit; color:var(--ink); background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:7px 14px; cursor:pointer}
+.more:hover{background:var(--soft)}
+
+/* 읽는 법 */
+details{margin-top:36px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:2px 18px}
+summary{cursor:pointer; font-weight:680; padding:14px 0}
+details ul{margin:0 0 14px; padding-left:20px; color:var(--muted)}
+details li{margin:6px 0}
+details li strong{color:var(--ink); font-weight:650}
+footer{margin-top:22px; color:var(--muted); font-size:13px}
+footer a{color:inherit}
+.note{margin:0 0 10px; font-size:13px; color:var(--muted)}
+
+@media (max-width:820px){
+  .wrap{padding-top:20px}
+  .field input{width:100%}
+  .field{flex:1 1 150px}
+  thead{display:none}
+  table,tbody{display:block}
+  tbody tr{
+    display:grid; grid-template-columns:1fr auto; gap:6px 12px; padding:14px;
+    grid-template-areas:"dest price" "tape tape" "sched disc" "recent samp";
+    border-bottom:1px solid var(--line);
+  }
+  tbody tr:last-child{border-bottom:0}
+  tbody td{display:block; padding:0; border:0}
+  tbody tr:hover td{background:transparent}
+  .c-dest{grid-area:dest}
+  .c-price{grid-area:price; text-align:right}
+  .c-tape{grid-area:tape}
+  .c-sched{grid-area:sched}
+  .c-disc{grid-area:disc; align-self:center; justify-self:end}
+  .c-recent{grid-area:recent}
+  .c-samp{grid-area:samp; text-align:right}
+  .c-recent::before,.c-samp::before{content:attr(data-label) " "; color:var(--muted); font-size:12.5px}
+  .tape{min-width:0}
+  .deals li{grid-template-columns:1fr auto; gap:2px 12px}
+  .deals .when{grid-column:1 / -1}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>항공권 최저가 현황</h1>
+    <p class="sub">인천·김포에서 출발하는 일본·중국·동남아 직항 왕복 항공권을 노선별로 모아, 평소 가격에 비해 얼마나 싼 가격이 나왔는지 보여 줍니다.</p>
+    <dl class="basis">
+      <div><dt>가격</dt><dd>왕복 검색 결과, 성인 1명, 이코노미</dd></div>
+      <div><dt>항공편</dt><dd>직항만</dd></div>
+      <div><dt>수집 방식</dt><dd>내일부터 약 4개월 안의 출발일을 무작위로 조회</dd></div>
+      <div><dt>평소 가격</dt><dd>최근 60일, 같은 노선·같은 항공사 유형(저비용/대형)끼리의 중앙값</dd></div>
+    </dl>
+  </header>
+
+  <div id="lead" class="lead" hidden></div>
+
+  <section class="controls" aria-label="보기 설정">
+    <div class="group"><span id="lb-region">지역</span><div class="seg" id="seg-region" role="group" aria-labelledby="lb-region"></div></div>
+    <div class="group"><span id="lb-origin">출발</span><div class="seg" id="seg-origin" role="group" aria-labelledby="lb-origin"></div></div>
+    <label class="field"><span>도착지 검색</span><input id="q" type="search" placeholder="예: 오사카, BKK" autocomplete="off"></label>
+    <label class="field"><span>표본이 최소</span>
+      <select id="min"><option value="1">1건 이상</option><option value="5">5건 이상</option><option value="8" selected>8건 이상</option><option value="12">12건 이상</option><option value="15">15건 이상</option></select>
+    </label>
+    <label class="field"><span>정렬</span>
+      <select id="sort">
+        <option value="discount">할인율 큰 순</option>
+        <option value="min">최저가 낮은 순</option>
+        <option value="recent">최근 7일 최저가 낮은 순</option>
+        <option value="dep">최저가 출발일 빠른 순</option>
+        <option value="dest">도착지 가나다 순</option>
+        <option value="samples">표본 많은 순</option>
+      </select>
+    </label>
+  </section>
+
+  <p id="src" class="note" hidden></p>
+  <p id="count" class="count" aria-live="polite"></p>
+
+  <div class="tablewrap" id="tablewrap">
+    <table>
+      <thead><tr>
+        <th data-sort="dest"><button type="button">도착</button></th>
+        <th>중앙값 대비 위치</th>
+        <th data-sort="min"><button type="button">최저가 왕복</button></th>
+        <th data-sort="discount"><button type="button">할인</button></th>
+        <th data-sort="dep"><button type="button">최저가 일정</button></th>
+        <th data-sort="recent"><button type="button">최근 7일 최저</button></th>
+        <th data-sort="samples"><button type="button">표본</button></th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <h2>최근 알림</h2>
+  <div id="deals"></div>
+
+  <details>
+    <summary>이 표를 읽는 법</summary>
+    <ul>
+      <li><strong>중앙값 대비 위치</strong>: 세로선이 중앙값, 큰 점이 최저가, 고리가 최근 7일 최저가입니다. 점이 세로선에서 왼쪽으로 멀수록 평소보다 싼 가격입니다.</li>
+      <li><strong>최저가</strong>: 수집한 가격 중 가장 싼 값입니다. 수집한 날의 가격이라 지금은 오르거나 매진됐을 수 있으니, 예약 전에 항공사 사이트에서 다시 확인하세요.</li>
+      <li><strong>중앙값</strong>: 같은 노선에서 같은 유형(저비용은 저비용끼리, 대형은 대형끼리)의 가격을 모은 가운데 값입니다. 출발일과 박수가 서로 다른 가격이 섞여 있어서, 비수기 날짜가 특히 싸게 보일 수 있습니다.</li>
+      <li><strong>표본</strong>: 그 노선에서 모은 가격의 개수입니다. 적을수록 비교가 덜 정확합니다.</li>
+      <li>목록에 없는 노선은 직항이 없거나 아직 조회되지 않은 곳입니다.</li>
+    </ul>
+  </details>
+
+  <footer>원본 파일은 <a href="https://github.com/dochifree/flight-tracker/tree/main/data">저장소의 data 폴더</a>에 있습니다.</footer>
+</div>
+
+<script>
+(() => {
+  const OWNER = 'dochifree', REPO = 'flight-tracker', BRANCH = 'main';
+  const RAW = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/data/`;
+  const WD = ['일','월','화','수','목','금','토'];
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const won = (n) => (n === null || n === '' || Number.isNaN(n)) ? '–' : Number(n).toLocaleString('ko-KR') + '원';
+  const md = (s) => {
+    if (!s) return '';
+    const [y, m, d] = s.split('-').map(Number);
+    return `${m}/${d}(${WD[new Date(y, m - 1, d).getDay()]})`;
+  };
+
+  function parseCSV(text) {
+    text = text.replace(/^﻿/, '');
+    const rows = []; let row = [], f = '', q = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) { if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+      else if (c === '"') q = true;
+      else if (c === ',') { row.push(f); f = ''; }
+      else if (c === '\n') { row.push(f); rows.push(row); row = []; f = ''; }
+      else if (c !== '\r') f += c;
+    }
+    if (f !== '' || row.length) { row.push(f); rows.push(row); }
+    const head = (rows.shift() || []).map(h => h.trim());
+    return rows.filter(r => r.length > 1).map(r => Object.fromEntries(head.map((h, i) => [h, (r[i] ?? '').trim()])));
+  }
+
+  async function load(name) {
+    const bucket = Math.floor(Date.now() / 300000);
+    const tries = [[`${RAW}${name}?v=${bucket}`, 'live'], [`data/${name}?v=${bucket}`, 'copy']];
+    for (const [url, kind] of tries) {
+      try {
+        const r = await fetch(url);
+        if (r.ok) return { text: await r.text(), kind };
+      } catch (e) { /* 다음 주소 시도 */ }
+    }
+    return null;
+  }
+
+  const pick = (r, ...keys) => { for (const k of keys) if (r[k] !== undefined && r[k] !== '') return r[k]; return ''; };
+
+  // 새 형식(한글 열 이름)과 예전 형식(영문 열 이름)을 모두 읽는다.
+  function normSummary(r) {
+    let o = pick(r, 'origin'), d = pick(r, 'destination');
+    const route = pick(r, '구간');
+    if (!o && route.includes('→')) [o, d] = route.split('→');
+    const median = Number(pick(r, '중앙값 왕복(원)', 'median_krw'));
+    const min = Number(pick(r, '최저가 왕복(원)', 'min_krw'));
+    const dep = pick(r, '최저가 출발일', 'min_depart_date');
+    const ret = pick(r, '최저가 귀국일', 'min_return_date');
+    let nights = pick(r, '최저가 박수');
+    if (nights === '' && dep && ret) nights = Math.round((new Date(ret) - new Date(dep)) / 86400000);
+    const rec = pick(r, '최근7일 최저가(원)');
+    return {
+      region: pick(r, '지역', 'region'),
+      route: route || (o && d ? `${o}→${d}` : ''),
+      originName: pick(r, '출발') || ({ ICN: '인천', GMP: '김포' }[o] || o),
+      destName: pick(r, '도착', 'dest_name') || d,
+      samples: Number(pick(r, '표본수', 'samples')),
+      median, min,
+      discount: median ? Math.round((1 - min / median) * 100) : 0,
+      nights, dep, ret,
+      tier: pick(r, '항공사 유형'),
+      airline: pick(r, '최저가 항공사', 'min_airlines'),
+      seen: pick(r, '최저가 확인일'),
+      recent: rec === '' ? null : Number(rec),
+      updated: pick(r, '갱신시각', 'updated_at'),
+    };
+  }
+
+  function normDeal(r) {
+    return {
+      at: r.collected_at, destName: r.dest_name, o: r.origin, d: r.destination,
+      dep: r.depart_date, ret: r.return_date, nights: r.nights, price: Number(r.price_krw),
+      median: Number(r.median_krw), disc: Number(r.discount_pct), air: r.airlines,
+      t1: r.depart_time, t2: r.arrive_time,
+    };
+  }
+
+  const state = { region: '전체', origin: '전체', q: '', min: 8, sort: 'discount', dir: null };
+  let ROWS = [], DEALS = [], dealsShown = 15;
+
+  const sorters = {
+    discount: [(a, b) => b.discount - a.discount || a.min - b.min, 'descending'],
+    min: [(a, b) => a.min - b.min, 'ascending'],
+    recent: [(a, b) => (a.recent ?? Infinity) - (b.recent ?? Infinity), 'ascending'],
+    dep: [(a, b) => (a.dep || '9').localeCompare(b.dep || '9'), 'ascending'],
+    dest: [(a, b) => a.destName.localeCompare(b.destName, 'ko'), 'ascending'],
+    samples: [(a, b) => b.samples - a.samples, 'descending'],
+  };
+
+  function tape(r) {
+    const LO = 0.4, HI = 1.1;
+    const pos = (p) => Math.max(0, Math.min(100, ((p / r.median) - LO) / (HI - LO) * 100));
+    const med = pos(r.median), mn = pos(r.min);
+    const rec = r.recent !== null ? pos(r.recent) : null;
+    const label = `중앙값 ${won(r.median)}, 최저가 ${won(r.min)}` + (r.recent !== null ? `, 최근 7일 최저가 ${won(r.recent)}` : '');
+    return `<span class="tape" role="img" aria-label="${esc(label)}">
+      <i class="gap" style="left:${mn}%;width:${Math.max(0, med - mn)}%"></i>
+      <i class="med" style="left:${med}%"></i>
+      ${rec !== null ? `<i class="rec" style="left:${rec}%"></i>` : ''}
+      <i class="min" style="left:${mn}%"></i></span>`;
+  }
+
+  function seg(id, key, values) {
+    const el = $(id);
+    el.innerHTML = ['전체', ...values].map(v => `<button type="button" aria-pressed="${state[key] === v}" data-v="${esc(v)}">${esc(v)}</button>`).join('');
+    el.onclick = (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      state[key] = b.dataset.v; seg(id, key, values); render();
+    };
+  }
+
+  function visible() {
+    const q = state.q.trim().toLowerCase();
+    const [cmp] = sorters[state.sort];
+    return ROWS.filter(r =>
+      (state.region === '전체' || r.region === state.region) &&
+      (state.origin === '전체' || r.originName === state.origin) &&
+      r.samples >= state.min &&
+      (!q || (r.destName + ' ' + r.originName).toLowerCase().includes(q) || (r.route || '').toLowerCase().includes(q))
+    ).sort(cmp);
+  }
+
+  function render() {
+    const list = visible();
+    $('#count').textContent = `노선 ${list.length}개 표시 (전체 ${ROWS.length}개)`;
+    document.querySelectorAll('thead th[data-sort]').forEach(th => {
+      th.setAttribute('aria-sort', th.dataset.sort === state.sort ? sorters[state.sort][1] : 'none');
+    });
+    $('#rows').innerHTML = list.length ? list.map(r => {
+      const cls = r.discount >= 30 ? 'hi' : r.discount >= 15 ? 'mid' : '';
+      const sched = r.dep ? `${md(r.dep)} → ${md(r.ret)}` : '–';
+      const sub = [r.nights !== '' ? `${r.nights}박` : '', r.airline].filter(Boolean).join(', ');
+      return `<tr>
+        <td class="c-dest"><b>${esc(r.destName)}</b><i class="chip">${esc(r.region)}</i><small>${esc(r.originName)} 출발${r.tier ? ` · ${esc(r.tier)}` : ''}</small></td>
+        <td class="c-tape">${tape(r)}<small>중앙값 ${won(r.median)}</small></td>
+        <td class="c-price"><span class="price">${won(r.min)}</span>${r.seen ? `<small>${esc(md(r.seen))} 확인</small>` : ''}</td>
+        <td class="c-disc"><span class="badge ${cls}">−${r.discount}%</span></td>
+        <td class="c-sched">${esc(sched)}<small>${esc(sub)}</small></td>
+        <td class="c-recent" data-label="최근 7일 최저">${r.recent !== null ? won(r.recent) : '<span class="nil">–</span>'}</td>
+        <td class="c-samp" data-label="표본">${r.samples}건</td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="7" class="nil" style="padding:22px 18px">조건에 맞는 노선이 없습니다. 표본 기준을 낮추거나 필터를 바꿔 보세요.</td></tr>`;
+
+    const best = ROWS.filter(r => r.samples >= state.min).sort(sorters.discount[0])[0] || ROWS.slice().sort(sorters.discount[0])[0];
+    const lead = $('#lead');
+    if (best) {
+      lead.hidden = false;
+      lead.innerHTML = `<p><strong>${esc(best.originName)} → ${esc(best.destName)}</strong>가 같은 유형 항공사의 중앙값보다 가장 많이 쌌습니다. ` +
+        `${esc(md(best.dep))}–${esc(md(best.ret))}${best.nights !== '' ? `(${best.nights}박)` : ''} 왕복 <strong>${won(best.min)}</strong>, ` +
+        `중앙값 ${won(best.median)}보다 <strong>${best.discount}%</strong> 낮습니다. <span class="muted">${esc(best.updated ? `${best.updated.slice(5)} 갱신` : '')}</span></p>`;
+    } else lead.hidden = true;
+  }
+
+  function renderDeals() {
+    const box = $('#deals');
+    if (!DEALS.length) {
+      box.innerHTML = `<p class="empty">아직 알림 기준(중앙값보다 25% 이상 저렴)을 넘은 가격이 없습니다. 노선별 표본이 쌓이면 이곳에 표시됩니다.</p>`;
+      return;
+    }
+    const list = DEALS.slice(0, dealsShown);
+    box.innerHTML = `<ul class="deals">` + list.map(d => `<li>
+      <span class="when">${esc((d.at || '').slice(5))}</span>
+      <span><b>${esc(d.o)} → ${esc(d.d)}</b> ${esc(d.destName)}</span>
+      <span>${esc(md(d.dep))} → ${esc(md(d.ret))}, ${esc(d.nights)}박<br><small class="nil">${esc(d.air)} ${esc(d.t1)}→${esc(d.t2)}</small></span>
+      <span class="price">${won(d.price)}</span>
+      <span class="badge ${d.disc >= 30 ? 'hi' : 'mid'}">−${d.disc}%</span></li>`).join('') + `</ul>` +
+      (DEALS.length > dealsShown ? `<button class="more" type="button" id="more">더 보기 (${DEALS.length - dealsShown}건)</button>` : '');
+    const more = $('#more');
+    if (more) more.onclick = () => { dealsShown += 20; renderDeals(); };
+  }
+
+  async function init() {
+    const [s, d] = await Promise.all([load('summary.csv'), load('deals.csv')]);
+    if (!s) {
+      $('#tablewrap').outerHTML = `<p class="empty">요약 파일(data/summary.csv)을 불러오지 못했습니다. 저장소의 data 폴더에 summary.csv가 있는지 확인하고, 잠시 뒤 새로고침하세요.</p>`;
+      $('#count').textContent = '';
+      $('#deals').innerHTML = '';
+      return;
+    }
+    ROWS = parseCSV(s.text).map(normSummary).filter(r => r.min > 0 && r.median > 0);
+    DEALS = d ? parseCSV(d.text).map(normDeal).sort((a, b) => (b.at || '').localeCompare(a.at || '') || b.disc - a.disc) : [];
+    if (s.kind === 'copy') {
+      const n = $('#src'); n.hidden = false;
+      n.textContent = '사이트에 저장된 사본을 표시 중입니다. 최신 값이 아닐 수 있어요. 잠시 뒤 새로고침해 보세요.';
+    }
+    seg('#seg-region', 'region', [...new Set(ROWS.map(r => r.region).filter(Boolean))]);
+    seg('#seg-origin', 'origin', [...new Set(ROWS.map(r => r.originName).filter(Boolean))]);
+    $('#q').oninput = (e) => { state.q = e.target.value; render(); };
+    $('#min').onchange = (e) => { state.min = Number(e.target.value); render(); };
+    $('#sort').onchange = (e) => { state.sort = e.target.value; render(); };
+    document.querySelector('thead').onclick = (e) => {
+      const th = e.target.closest('th[data-sort]'); if (!th) return;
+      state.sort = th.dataset.sort; $('#sort').value = state.sort; render();
+    };
+    render(); renderDeals();
+  }
+  init();
+})();
+</script>
+</body>
+</html>
