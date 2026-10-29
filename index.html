@@ -157,7 +157,7 @@ footer a{color:inherit}
       <div><dt>항공편</dt><dd>직항만</dd></div>
       <div><dt>수집 방식</dt><dd>내일부터 약 4개월 안의 출발일을 무작위로 조회</dd></div>
       <div><dt>연차 계산</dt><dd>출발일~귀국일 중 평일(공휴일 제외)의 수</dd></div>
-      <div><dt>평소 가격</dt><dd>최근 60일, 같은 노선·같은 항공사 유형(저비용/대형)끼리의 중앙값</dd></div>
+      <div><dt>평소 가격</dt><dd>최근 60일, 같은 노선·같은 항공사 유형(저비용/대형)·비슷한 연차(2일 이하끼리, 3일 이상끼리)의 중앙값</dd></div>
     </dl>
   </header>
 
@@ -264,6 +264,17 @@ footer a{color:inherit}
   // 받침 유무에 따라 '이/가'를 고른다(한글이 아니면 '가').
   const ga = (w) => { const c = (w || '').trim().slice(-1).charCodeAt(0); return c >= 0xAC00 && c <= 0xD7A3 && (c - 0xAC00) % 28 ? '이' : '가'; };
 
+  // 연차 = 출발일~귀국일(양끝 포함) 중 평일이면서 공휴일이 아닌 날. (tracker.py와 같은 계산)
+  const HOLIDAYS = new Set(["2026-12-25", "2027-01-01", "2027-02-06", "2027-02-07", "2027-02-08", "2027-02-09", "2027-03-01", "2027-05-01", "2027-05-03", "2027-05-05", "2027-05-13", "2027-06-06", "2027-07-17", "2027-07-19", "2027-08-15", "2027-08-16", "2027-09-14", "2027-09-15", "2027-09-16", "2027-10-03", "2027-10-04", "2027-10-09", "2027-10-11", "2027-12-25", "2027-12-27"]);
+  function leaveDays(dep, ret) {
+    let n = 0;
+    for (let d = new Date(dep + 'T00:00:00Z'), e = new Date(ret + 'T00:00:00Z'); d <= e; d = new Date(d.getTime() + 864e5)) {
+      const wd = d.getUTCDay();
+      if (wd !== 0 && wd !== 6 && !HOLIDAYS.has(d.toISOString().slice(0, 10))) n++;
+    }
+    return n;
+  }
+
   const pick = (r, ...keys) => { for (const k of keys) if (r[k] !== undefined && r[k] !== '') return r[k]; return ''; };
 
   // 새 형식(한글 열 이름)과 예전 형식(영문 열 이름)을 모두 읽는다.
@@ -288,7 +299,7 @@ footer a{color:inherit}
       discount: median ? Math.round((1 - min / median) * 100) : 0,
       nights, dep, ret,
       tier: pick(r, '항공사 유형'),
-      leave: pick(r, '최저가 연차(일)') === '' ? null : Number(pick(r, '최저가 연차(일)')),
+      leave: pick(r, '최저가 연차(일)') !== '' ? Number(pick(r, '최저가 연차(일)')) : (dep && ret ? leaveDays(dep, ret) : null),
       airline: pick(r, '최저가 항공사', 'min_airlines'),
       seen: pick(r, '최저가 확인일'),
       recent: rec === '' ? null : Number(rec),
@@ -305,17 +316,16 @@ footer a{color:inherit}
     };
   }
 
-  const state = { region: '전체', origin: '전체', q: '', min: 5, sort: 'discount', dir: null, nights: '전체', leave: '2' };
+  const state = { region: '전체', origin: '전체', q: '', min: 5, sort: 'discount', dir: null, nights: '전체', leave: '전체' };
   let ROWS = [], ALL = [], DEALS = [], dealsShown = 15, HAS_OFFERS = false;
 
   // 박수·연차 조건에 맞는 일정 중에서 노선·항공사 유형별 최저가 한 줄만 고른다.
   function rebuild() {
-    if (!HAS_OFFERS) { ROWS = ALL; return; }
     const best = new Map();
     for (const r of ALL) {
       if (state.nights !== '전체' && String(r.nights) !== state.nights) continue;
       if (state.leave !== '전체' && (r.leave === null || r.leave > Number(state.leave))) continue;
-      const k = r.route + '|' + r.tier;
+      const k = r.route + '|' + r.tier + '|' + (r.leave !== null && r.leave <= 2 ? 'low' : 'high');
       const cur = best.get(k);
       if (!cur) best.set(k, { ...r }); else {
         const recents = [cur.recent, r.recent].filter(v => v !== null);
@@ -429,22 +439,18 @@ footer a{color:inherit}
     }
     ALL = parseCSV(s.text).map(normSummary).filter(r => r.min > 0 && r.median > 0);
     HAS_OFFERS = !!o && ALL.some(r => r.leave !== null);
-    if (HAS_OFFERS) {
-      const ns = [...new Set(ALL.map(r => String(r.nights)).filter(v => v && v !== 'NaN'))].sort((a, b) => a - b);
-      $('#nights').innerHTML = '<option value="전체">전체</option>' + ns.map(v => `<option value="${v}">${v}박</option>`).join('');
-      const mx = Math.max(...ALL.map(r => r.leave ?? 0));
-      let ls = '<option value="전체">제한 없음</option>';
-      for (let i = 0; i <= mx; i++) ls += `<option value="${i}">${i}일 이하</option>`;
-      $('#leave').innerHTML = ls;
-      if (state.leave !== '전체' && Number(state.leave) > mx) state.leave = String(mx);
-      $('#leave').value = state.leave;
-      $('#nights').onchange = (e) => { state.nights = e.target.value; render(); };
-      $('#leave').onchange = (e) => { state.leave = e.target.value; render(); };
-    } else {
-      for (const id of ['#nights', '#leave']) { $(id).disabled = true; }
-      state.leave = '전체';
+    const ns = [...new Set(ALL.map(r => String(r.nights)).filter(v => v && v !== 'NaN'))].sort((a, b) => a - b);
+    $('#nights').innerHTML = '<option value="전체">전체</option>' + ns.map(v => `<option value="${v}">${v}박</option>`).join('');
+    const mx = Math.max(0, ...ALL.map(r => r.leave ?? 0));
+    let ls = '<option value="전체">제한 없음</option>';
+    for (let i = 0; i <= mx; i++) ls += `<option value="${i}">${i}일 이하</option>`;
+    $('#leave').innerHTML = ls;
+    $('#nights').onchange = (e) => { state.nights = e.target.value; render(); };
+    $('#leave').onchange = (e) => { state.leave = e.target.value; render(); };
+    if (!HAS_OFFERS) {
+      const n = $('#src'); n.hidden = false;
+      n.textContent = '박수·연차별 상세 데이터(offers.csv)가 아직 없어, 노선별 최저가 한 건만 걸러서 보여 줍니다. 다음 데이터 갱신 후 전체 조건으로 보입니다.';
     }
-    DEALS = d ? parseCSV(d.text).map(normDeal).sort((a, b) => (b.at || '').localeCompare(a.at || '') || b.disc - a.disc) : [];
     if (s.kind === 'copy') {
       const n = $('#src'); n.hidden = false;
       n.textContent = '사이트에 저장된 사본을 표시 중입니다. 최신 값이 아닐 수 있어요. 잠시 뒤 새로고침해 보세요.';
