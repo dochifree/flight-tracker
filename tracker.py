@@ -48,6 +48,7 @@ SUMMARY_COLUMNS = [
     ("min_krw", "최저가 왕복(원)"),
     ("discount_pct", "최저가 할인율(%)"),
     ("min_nights", "최저가 박수"),
+    ("min_leave", "최저가 연차(일)"),
     ("min_depart_date", "최저가 출발일"),
     ("min_return_date", "최저가 귀국일"),
     ("min_airlines", "최저가 항공사"),
@@ -168,6 +169,17 @@ def build_pairs(cfg: dict) -> list:
     return pairs
 
 
+def leave_days(depart: date, ret: date, holidays: set) -> int:
+    """출발일~귀국일(양끝 포함) 중 평일이면서 공휴일이 아닌 날 수 = 필요한 연차 일수.
+    (출발일 저녁 비행기라서 연차가 덜 필요할 수 있지만, 보수적으로 하루로 셉니다.)"""
+    n, d = 0, depart
+    while d <= ret:
+        if d.weekday() < 5 and d.isoformat() not in holidays:
+            n += 1
+        d += timedelta(days=1)
+    return n
+
+
 def plan_tasks(cfg: dict, pairs: list, state: dict, today: date) -> list:
     active = [p for p in pairs
               if state["pairs"].get(f"{p['origin']}-{p['dest']}", {}).get("skip_until", "") < today.isoformat()]
@@ -176,10 +188,16 @@ def plan_tasks(cfg: dict, pairs: list, state: dict, today: date) -> list:
     first = today + timedelta(days=cfg["start_offset_days"])
     window = [first + timedelta(days=i) for i in range(cfg["horizon_days"])]
     per_pair = max(1, cfg["queries_per_run"] // len(active))
+    holidays, cap = set(cfg.get("holidays", [])), cfg.get("max_leave_days", 3)
+    # 연차를 cap일 이하로 쓰는 (출발일, 박수) 조합만 후보로 삼는다.
+    combos = [(d, n) for d in window for n in cfg["nights"]
+              if leave_days(d, d + timedelta(days=n), holidays) <= cap]
+    if not combos:
+        return []
     tasks = []
     for p in active:
-        for d in random.sample(window, min(per_pair, len(window))):
-            tasks.append({**p, "depart": d, "nights": random.choice(cfg["nights"])})
+        for d, n in random.sample(combos, min(per_pair, len(combos))):
+            tasks.append({**p, "depart": d, "nights": n})
     random.shuffle(tasks)
     return tasks[: cfg["queries_per_run"]]
 
@@ -213,30 +231,54 @@ def carrier_group(airlines: str, groups: dict) -> str:
     return first or "미상"
 
 
-def build_summary(by_pair: dict, names: dict, today: date, stamp: str) -> list:
-    """노선x항공사유형별 요약. 중앙값 대비 최저가 할인율이 큰 줄이 맨 위로 오도록 정렬."""
+def _row(o, d, tier, lst, pool, names, today, stamp):
+    """lst: 기준선(중앙값)용 전체 표본, pool: 최저가를 고를 후보."""
     recent_cut = (today - timedelta(days=7)).isoformat()
+    cheapest = min(pool, key=lambda s: s["price_krw"])
+    med = int(statistics.median(s["price_krw"] for s in lst))
+    recent = [s["price_krw"] for s in pool if s["collected_at"][:10] >= recent_cut]
+    nm, rg = names.get((o, d), (d, ""))
+    return {
+        "region": rg, "origin_name": ORIGIN_NAMES.get(o, o), "dest_name": nm,
+        "route": f"{o}→{d}", "tier": tier, "samples": len(lst), "median_krw": med,
+        "min_krw": cheapest["price_krw"],
+        "discount_pct": round((1 - cheapest["price_krw"] / med) * 100) if med else 0,
+        "min_nights": cheapest.get("nights", ""), "min_leave": cheapest.get("leave", ""),
+        "min_depart_date": cheapest["depart_date"], "min_return_date": cheapest["return_date"],
+        "min_airlines": cheapest["airlines"], "min_stops": cheapest.get("stops", ""),
+        "min_times": f"{cheapest.get('depart_time', '')}→{cheapest.get('arrive_time', '')}",
+        "min_seen": cheapest["collected_at"][:10],
+        "recent7_min_krw": min(recent) if recent else "",
+        "updated_at": stamp,
+    }
+
+
+def _sort(rows: list) -> list:
+    rows.sort(key=lambda r: (-r["discount_pct"], r["min_krw"]))
+    return rows
+
+
+def build_summary(by_pair: dict, names: dict, today: date, stamp: str) -> list:
+    """노선x항공사유형별 요약(출발 전인 항목 중 최저가). 할인율 큰 줄이 맨 위."""
     out = []
     for (o, d, tier), lst in by_pair.items():
-        cheapest = min(lst, key=lambda s: s["price_krw"])
-        med = int(statistics.median(s["price_krw"] for s in lst))
-        recent = [s["price_krw"] for s in lst if s["collected_at"][:10] >= recent_cut]
-        nm, rg = names.get((o, d), (d, ""))
-        out.append({
-            "region": rg, "origin_name": ORIGIN_NAMES.get(o, o), "dest_name": nm,
-            "route": f"{o}→{d}", "tier": tier, "samples": len(lst), "median_krw": med,
-            "min_krw": cheapest["price_krw"],
-            "discount_pct": round((1 - cheapest["price_krw"] / med) * 100) if med else 0,
-            "min_nights": cheapest.get("nights", ""),
-            "min_depart_date": cheapest["depart_date"], "min_return_date": cheapest["return_date"],
-            "min_airlines": cheapest["airlines"], "min_stops": cheapest.get("stops", ""),
-            "min_times": f"{cheapest.get('depart_time', '')}→{cheapest.get('arrive_time', '')}",
-            "min_seen": cheapest["collected_at"][:10],
-            "recent7_min_krw": min(recent) if recent else "",
-            "updated_at": stamp,
-        })
-    out.sort(key=lambda r: (-r["discount_pct"], r["min_krw"]))
-    return out
+        fut = [s for s in lst if s["depart_date"] > today.isoformat()]
+        if fut:
+            out.append(_row(o, d, tier, lst, fut, names, today, stamp))
+    return _sort(out)
+
+
+def build_offers(by_pair: dict, names: dict, today: date, stamp: str) -> list:
+    """노선x항공사유형x박수x연차별 최저가. 웹페이지에서 박수·연차 조건으로 걸러 볼 때 쓴다."""
+    out = []
+    for (o, d, tier), lst in by_pair.items():
+        buckets: dict = {}
+        for s in lst:
+            if s["depart_date"] > today.isoformat():
+                buckets.setdefault((s.get("nights"), s.get("leave")), []).append(s)
+        for pool in buckets.values():
+            out.append(_row(o, d, tier, lst, pool, names, today, stamp))
+    return _sort(out)
 
 
 def main() -> int:
@@ -310,8 +352,15 @@ def main() -> int:
     acfg = cfg.get("alert", {})
     recent = load_recent_prices(data_dir, today, acfg.get("lookback_days", 60))
     groups = cfg.get("carrier_groups", {})
+    holidays, cap = set(cfg.get("holidays", [])), cfg.get("max_leave_days", 3)
     by_pair: dict = {}  # (출발, 도착, 항공사 유형) 별로 따로 모아 같은 유형끼리만 비교
     for r in recent:
+        try:
+            r["leave"] = leave_days(date.fromisoformat(r["depart_date"]), date.fromisoformat(r["return_date"]), holidays)
+        except (ValueError, KeyError):
+            continue
+        if r["leave"] > cap:
+            continue  # 연차를 너무 많이 써야 하는 일정은 기준선에서도 뺀다
         r["tier"] = carrier_group(r.get("airlines", ""), groups)
         by_pair.setdefault((r["origin"], r["destination"], r["tier"]), []).append(r)
 
@@ -322,7 +371,11 @@ def main() -> int:
         old_deals[(r["origin"], r["destination"], r["depart_date"], r["return_date"])] = (r["collected_at"][:10], int(r["price_krw"]))
 
     new_deals = []
+    alert_leave = acfg.get("max_leave_days", 2)
     for r in rows:
+        r["leave"] = leave_days(date.fromisoformat(r["depart_date"]), date.fromisoformat(r["return_date"]), holidays)
+        if r["leave"] > alert_leave:
+            continue  # 연차를 더 써야 하는 일정은 알리지 않는다
         tier = carrier_group(r["airlines"], groups)
         samples = by_pair.get((r["origin"], r["destination"], tier), [])
         if len(samples) < acfg.get("min_samples", 8):
@@ -344,7 +397,7 @@ def main() -> int:
     append_csv(deals_path, DEAL_FIELDS, new_deals)
     for d in new_deals[:10]:
         msg = (f"✈ {d['origin']}→{d['destination']} {d['dest_name']} "
-               f"{d['depart_date']}~{d['return_date']}({d['nights']}박) {d['price_krw']:,}원 "
+               f"{d['depart_date']}~{d['return_date']}({d['nights']}박, 연차 {d['leave']}일) {d['price_krw']:,}원 "
                f"({d['tier']} 평소 중앙값 {d['median_krw']:,}원 대비 -{d['discount_pct']}%) {d['airlines']} {d['depart_time']}→{d['arrive_time']}")
         print(msg)
         send_telegram(msg)
@@ -352,13 +405,14 @@ def main() -> int:
         send_telegram(f"그 외 {len(new_deals) - 10}건은 data/deals.csv에서 확인하세요.")
 
     # 노선별 요약 (할인율 큰 순)
-    summary = build_summary(by_pair, names, today, stamp)
-    if summary:
-        with (data_dir / "summary.csv").open("w", encoding="utf-8-sig", newline="") as f:
-            w = csv.writer(f)
-            w.writerow([h for _, h in SUMMARY_COLUMNS])
-            for r in summary:
-                w.writerow([r.get(k, "") for k, _ in SUMMARY_COLUMNS])
+    for fname, build in (("summary.csv", build_summary), ("offers.csv", build_offers)):
+        table = build(by_pair, names, today, stamp)
+        if table:
+            with (data_dir / fname).open("w", encoding="utf-8-sig", newline="") as f:
+                w = csv.writer(f)
+                w.writerow([h for _, h in SUMMARY_COLUMNS])
+                for r in table:
+                    w.writerow([r.get(k, "") for k, _ in SUMMARY_COLUMNS])
 
     print(f"완료: 저장 {len(rows)}건 / 결과없음 {counts['empty']}건 / 오류 {counts['error']}건 / "
           f"새 알림 {len(new_deals)}건 / 소요 {(time.time() - t0) / 60:.1f}분")
