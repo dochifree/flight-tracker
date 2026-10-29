@@ -180,6 +180,11 @@ def leave_days(depart: date, ret: date, holidays: set) -> int:
     return n
 
 
+def leave_band(leave: int, split: int) -> str:
+    """기준선(중앙값)은 연차를 적게 쓰는 일정끼리, 많이 쓰는 일정끼리 따로 계산한다."""
+    return "low" if leave <= split else "high"
+
+
 def plan_tasks(cfg: dict, pairs: list, state: dict, today: date) -> list:
     active = [p for p in pairs
               if state["pairs"].get(f"{p['origin']}-{p['dest']}", {}).get("skip_until", "") < today.isoformat()]
@@ -188,15 +193,19 @@ def plan_tasks(cfg: dict, pairs: list, state: dict, today: date) -> list:
     first = today + timedelta(days=cfg["start_offset_days"])
     window = [first + timedelta(days=i) for i in range(cfg["horizon_days"])]
     per_pair = max(1, cfg["queries_per_run"] // len(active))
-    holidays, cap = set(cfg.get("holidays", [])), cfg.get("max_leave_days", 3)
-    # 연차를 cap일 이하로 쓰는 (출발일, 박수) 조합만 후보로 삼는다.
-    combos = [(d, n) for d in window for n in cfg["nights"]
-              if leave_days(d, d + timedelta(days=n), holidays) <= cap]
-    if not combos:
-        return []
+    holidays, split = set(cfg.get("holidays", [])), cfg.get("low_leave_max", 2)
+    # 연차를 적게 쓰는 일정(low)과 많이 쓰는 일정(high)을 나눠 두고, low 쪽을 더 많이 뽑는다.
+    # (연차 제한은 두지 않는다. 연차를 더 써도 싸면 알림 대상이다.)
+    low, high = [], []
+    for d in window:
+        for n in cfg["nights"]:
+            (low if leave_days(d, d + timedelta(days=n), holidays) <= split else high).append((d, n))
+    n_low = min(len(low), round(per_pair * cfg.get("low_leave_share", 0.6)))
+    n_high = min(len(high), per_pair - n_low)
     tasks = []
     for p in active:
-        for d, n in random.sample(combos, min(per_pair, len(combos))):
+        picks = random.sample(low, n_low) + random.sample(high, n_high)
+        for d, n in picks:
             tasks.append({**p, "depart": d, "nights": n})
     random.shuffle(tasks)
     return tasks[: cfg["queries_per_run"]]
@@ -261,7 +270,7 @@ def _sort(rows: list) -> list:
 def build_summary(by_pair: dict, names: dict, today: date, stamp: str) -> list:
     """노선x항공사유형별 요약(출발 전인 항목 중 최저가). 할인율 큰 줄이 맨 위."""
     out = []
-    for (o, d, tier), lst in by_pair.items():
+    for (o, d, tier, _band), lst in by_pair.items():
         fut = [s for s in lst if s["depart_date"] > today.isoformat()]
         if fut:
             out.append(_row(o, d, tier, lst, fut, names, today, stamp))
@@ -271,7 +280,7 @@ def build_summary(by_pair: dict, names: dict, today: date, stamp: str) -> list:
 def build_offers(by_pair: dict, names: dict, today: date, stamp: str) -> list:
     """노선x항공사유형x박수x연차별 최저가. 웹페이지에서 박수·연차 조건으로 걸러 볼 때 쓴다."""
     out = []
-    for (o, d, tier), lst in by_pair.items():
+    for (o, d, tier, _band), lst in by_pair.items():
         buckets: dict = {}
         for s in lst:
             if s["depart_date"] > today.isoformat():
@@ -352,17 +361,15 @@ def main() -> int:
     acfg = cfg.get("alert", {})
     recent = load_recent_prices(data_dir, today, acfg.get("lookback_days", 60))
     groups = cfg.get("carrier_groups", {})
-    holidays, cap = set(cfg.get("holidays", [])), cfg.get("max_leave_days", 3)
-    by_pair: dict = {}  # (출발, 도착, 항공사 유형) 별로 따로 모아 같은 유형끼리만 비교
+    holidays, split = set(cfg.get("holidays", [])), cfg.get("low_leave_max", 2)
+    by_pair: dict = {}  # (출발, 도착, 항공사 유형, 연차 구분) 별로 따로 모아 같은 조건끼리만 비교
     for r in recent:
         try:
             r["leave"] = leave_days(date.fromisoformat(r["depart_date"]), date.fromisoformat(r["return_date"]), holidays)
         except (ValueError, KeyError):
             continue
-        if r["leave"] > cap:
-            continue  # 연차를 너무 많이 써야 하는 일정은 기준선에서도 뺀다
         r["tier"] = carrier_group(r.get("airlines", ""), groups)
-        by_pair.setdefault((r["origin"], r["destination"], r["tier"]), []).append(r)
+        by_pair.setdefault((r["origin"], r["destination"], r["tier"], leave_band(r["leave"], split)), []).append(r)
 
     names = {(p["origin"], p["dest"]): (p["name"], p["region"]) for p in pairs}
     deals_path = data_dir / "deals.csv"
@@ -371,13 +378,10 @@ def main() -> int:
         old_deals[(r["origin"], r["destination"], r["depart_date"], r["return_date"])] = (r["collected_at"][:10], int(r["price_krw"]))
 
     new_deals = []
-    alert_leave = acfg.get("max_leave_days", 2)
     for r in rows:
         r["leave"] = leave_days(date.fromisoformat(r["depart_date"]), date.fromisoformat(r["return_date"]), holidays)
-        if r["leave"] > alert_leave:
-            continue  # 연차를 더 써야 하는 일정은 알리지 않는다
         tier = carrier_group(r["airlines"], groups)
-        samples = by_pair.get((r["origin"], r["destination"], tier), [])
+        samples = by_pair.get((r["origin"], r["destination"], tier, leave_band(r["leave"], split)), [])
         if len(samples) < acfg.get("min_samples", 8):
             continue
         med = statistics.median(s["price_krw"] for s in samples)
