@@ -207,10 +207,38 @@ def nonwork_days(depart: date, ret: date, holidays: set) -> int:
     return (ret - depart).days + 1 - leave_days(depart, ret, holidays)
 
 
+def split_quota(total: int, demand: dict, avail: dict) -> dict:
+    """total개를 지역별 수요(demand)에 비례해 나누되, 지역별 가용 개수(avail)를 넘기지 않는다.
+    남는 몫은 다른 지역에 다시 나눈다."""
+    out = {r: 0 for r in demand}
+    left = total
+    live = {r for r in demand if avail.get(r, 0) > 0 and demand[r] > 0}
+    while left > 0 and live:
+        wsum = sum(demand[r] for r in live)
+        share = {r: left * demand[r] / wsum for r in live}
+        give = {r: min(int(share[r]), avail[r] - out[r]) for r in live}
+        used = sum(give.values())
+        if used == 0:  # 소수점 이하만 남았으면 몫이 큰 지역부터 1개씩
+            for r in sorted(live, key=lambda r: -(share[r] - int(share[r]))):
+                if left == 0:
+                    break
+                if out[r] < avail[r]:
+                    out[r] += 1
+                    left -= 1
+            live = {r for r in live if out[r] < avail[r]}
+            continue
+        for r in live:
+            out[r] += give[r]
+        left -= used
+        live = {r for r in live if out[r] < avail[r]}
+    return out
+
+
 def plan_tasks(cfg: dict, pairs: list, state: dict, today: date, seen: dict = None, now: datetime = None) -> list:
-    """이번에 조회할 왕복 일정을 고른다. 무작위가 아니라 "가장 오래 조회하지 않은 일정부터" 순서로 고른다.
-    (한 번도 조회하지 않은 일정이 가장 먼저, 그다음은 조회한 지 오래된 순. 그래서 모든 일정을 빠짐없이 한 바퀴 돈다.)
-    아직 직항이 확인되지 않은 노선(저장된 가격이 한 번도 없는 노선)은 한 번에 probe_per_run건만 시험 조회한다."""
+    """이번에 조회할 왕복 일정을 고른다.
+    1) 직항이 아직 확인되지 않은 노선(저장된 가격이 한 번도 없는 노선)은 노선당 probe_per_run건만 먼저 시험 조회한다.
+    2) 나머지 조회 건수는 지역별 (가중치 x 일정 수)에 비례해 나눈다. 그래서 지역 가중치가 클수록 더 자주 돈다.
+    3) 지역 안에서는 "가장 오래 조회하지 않은 일정부터" 고른다. (한 번도 안 본 일정이 가장 먼저)"""
     seen = seen or {}
     active = [p for p in pairs
               if state["pairs"].get(f"{p['origin']}-{p['dest']}", {}).get("skip_until", "") < today.isoformat()]
@@ -226,8 +254,7 @@ def plan_tasks(cfg: dict, pairs: list, state: dict, today: date, seen: dict = No
         return []
     probe = cfg.get("probe_per_run", 2)
     weights = cfg.get("region_weight", {})
-    now = now or datetime.now(KST).replace(tzinfo=None)
-    now = now.replace(tzinfo=None)
+    now = (now or datetime.now(KST)).replace(tzinfo=None)
     cap_h = 24 * 60  # 한 번도 조회하지 않은 일정의 '지난 시간'(시간 단위)
     age_cache = {}
 
@@ -241,19 +268,24 @@ def plan_tasks(cfg: dict, pairs: list, state: dict, today: date, seen: dict = No
                 age_cache[ts] = cap_h
         return age_cache[ts]
 
-    cand = []
+    budget = cfg["queries_per_run"]
+    chosen, by_region = [], {}
     for p in active:
         st = state["pairs"].get(f"{p['origin']}-{p['dest']}", {})
-        w = float(weights.get(p["region"], 1))
-        # 우선순위 = (마지막 조회 이후 지난 시간) x 지역 가중치. 값이 클수록 먼저 조회한다.
-        mine = [(-age_hours(seen.get((p["origin"], p["dest"], d.isoformat(), str(n)), "")) * w, random.random(), p, d, n)
+        mine = [(-age_hours(seen.get((p["origin"], p["dest"], d.isoformat(), str(n)), "")), random.random(), p, d, n)
                 for d, n in combos]
         mine.sort(key=lambda x: (x[0], x[1]))
         if st.get("ok", 0) == 0:
-            mine = mine[:probe]
-        cand.extend(mine)
-    cand.sort(key=lambda x: (x[0], x[1]))
-    tasks = [{**p, "depart": d, "nights": n} for _, _, p, d, n in cand[: cfg["queries_per_run"]]]
+            chosen.extend(mine[:probe])  # 시험 조회
+        else:
+            by_region.setdefault(p["region"], []).extend(mine)
+    left = max(0, budget - len(chosen))
+    demand = {r: float(weights.get(r, 1)) * len(items) for r, items in by_region.items()}
+    quota = split_quota(left, demand, {r: len(items) for r, items in by_region.items()})
+    for r, items in by_region.items():
+        items.sort(key=lambda x: (x[0], x[1]))
+        chosen.extend(items[: quota.get(r, 0)])
+    tasks = [{**p, "depart": d, "nights": n} for _, _, p, d, n in chosen[:budget]]
     random.shuffle(tasks)  # 순서만 섞는다(한 노선에 연달아 몰리지 않게)
     return tasks
 
@@ -287,9 +319,12 @@ def plan_legs(cfg: dict, pairs: list, state: dict, today: date, leg_seen: dict =
         except ValueError:
             return cap
 
-    best = []
+    per_region = {}
     for p in active:
         st = state["pairs"].get(f"{p['origin']}-{p['dest']}", {})
+        # 직항이 확인되지 않은 노선은 편도 조합 조회를 하지 않는다(왕복 시험 조회로 먼저 확인)
+        if st.get("ok", 0) == 0:
+            continue
         ages = {d: age(p["origin"], p["dest"], d) for d in window}
         top = None
         for s0 in range(0, len(window) - k + 1):
@@ -299,14 +334,16 @@ def plan_legs(cfg: dict, pairs: list, state: dict, today: date, leg_seen: dict =
             cand = (score, random.random(), s0)
             if top is None or cand > top:
                 top = cand
-        if top is None:
-            continue
-        # 직항이 확인되지 않은 노선은 편도 조합 조회를 하지 않는다(왕복 시험 조회로 먼저 확인)
-        if st.get("ok", 0) == 0:
-            continue
-        best.append((top[0] * float(cfg.get("region_weight", {}).get(p["region"], 1)), random.random(), p, top[2]))
-    best.sort(key=lambda x: (-x[0], x[1]))
-    return [{**p, "days": window[s0:s0 + k]} for _, _, p, s0 in best[:n_blocks]]
+        if top is not None:
+            per_region.setdefault(p["region"], []).append((top[0], top[1], p, top[2]))
+    weights = cfg.get("region_weight", {})
+    demand = {r: float(weights.get(r, 1)) * len(v) for r, v in per_region.items()}
+    quota = split_quota(n_blocks, demand, {r: len(v) for r, v in per_region.items()})
+    picked = []
+    for r, v in per_region.items():
+        v.sort(key=lambda x: (-x[0], x[1]))
+        picked.extend(v[: quota.get(r, 0)])
+    return [{**p, "days": window[s0:s0 + k]} for _, _, p, s0 in picked]
 
 
 def google_link(origin: str, dest: str, depart: str, ret: str = "") -> str:
