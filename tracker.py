@@ -369,6 +369,11 @@ def main() -> int:
     groups = cfg.get("carrier_groups", {})
     holidays, split = set(cfg.get("holidays", [])), cfg.get("low_leave_max", 2)
     by_pair: dict = {}  # (출발, 도착, 항공사 유형, 연차 구분) 별로 따로 모아 같은 조건끼리만 비교
+    # 기준선은 "지금 조회 범위(내일부터 horizon_days일)에 출발하는 일정"만으로 계산한다.
+    # 이미 출발했거나 범위를 벗어난 일정의 가격은 지금과 시즌이 달라 제외한다.
+    win_lo = today + timedelta(days=cfg["start_offset_days"])
+    win_hi = win_lo + timedelta(days=cfg["horizon_days"] - 1)
+    recent = [r for r in recent if win_lo.isoformat() <= r.get("depart_date", "") <= win_hi.isoformat()]
     for r in recent:
         try:
             r["leave"] = leave_days(date.fromisoformat(r["depart_date"]), date.fromisoformat(r["return_date"]), holidays)
