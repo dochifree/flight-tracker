@@ -207,46 +207,106 @@ def nonwork_days(depart: date, ret: date, holidays: set) -> int:
     return (ret - depart).days + 1 - leave_days(depart, ret, holidays)
 
 
-def plan_tasks(cfg: dict, pairs: list, state: dict, today: date) -> list:
+def plan_tasks(cfg: dict, pairs: list, state: dict, today: date, seen: dict = None, now: datetime = None) -> list:
+    """이번에 조회할 왕복 일정을 고른다. 무작위가 아니라 "가장 오래 조회하지 않은 일정부터" 순서로 고른다.
+    (한 번도 조회하지 않은 일정이 가장 먼저, 그다음은 조회한 지 오래된 순. 그래서 모든 일정을 빠짐없이 한 바퀴 돈다.)
+    아직 직항이 확인되지 않은 노선(저장된 가격이 한 번도 없는 노선)은 한 번에 probe_per_run건만 시험 조회한다."""
+    seen = seen or {}
     active = [p for p in pairs
               if state["pairs"].get(f"{p['origin']}-{p['dest']}", {}).get("skip_until", "") < today.isoformat()]
     if not active:
         return []
     first = today + timedelta(days=cfg["start_offset_days"])
     window = [first + timedelta(days=i) for i in range(cfg["horizon_days"])]
-    per_pair = max(1, cfg["queries_per_run"] // len(active))
     holidays, need = set(cfg.get("holidays", [])), cfg.get("min_nonwork_days", 2)
     # 주말·공휴일이 need일 이상 낀 (출발일, 박수) 조합만 후보로 삼는다. 연차 일수는 제한하지 않는다.
     combos = [(d, n) for d in window for n in cfg["nights"]
               if nonwork_days(d, d + timedelta(days=n), holidays) >= need]
     if not combos:
         return []
-    tasks = []
+    probe = cfg.get("probe_per_run", 2)
+    weights = cfg.get("region_weight", {})
+    now = now or datetime.now(KST).replace(tzinfo=None)
+    now = now.replace(tzinfo=None)
+    cap_h = 24 * 60  # 한 번도 조회하지 않은 일정의 '지난 시간'(시간 단위)
+    age_cache = {}
+
+    def age_hours(ts: str) -> float:
+        if not ts:
+            return cap_h
+        if ts not in age_cache:
+            try:
+                age_cache[ts] = min(cap_h, max(0.0, (now - datetime.strptime(ts[:16], "%Y-%m-%d %H:%M")).total_seconds() / 3600))
+            except ValueError:
+                age_cache[ts] = cap_h
+        return age_cache[ts]
+
+    cand = []
     for p in active:
-        for d, n in random.sample(combos, min(per_pair, len(combos))):
-            tasks.append({**p, "depart": d, "nights": n})
-    random.shuffle(tasks)
-    return tasks[: cfg["queries_per_run"]]
+        st = state["pairs"].get(f"{p['origin']}-{p['dest']}", {})
+        w = float(weights.get(p["region"], 1))
+        # 우선순위 = (마지막 조회 이후 지난 시간) x 지역 가중치. 값이 클수록 먼저 조회한다.
+        mine = [(-age_hours(seen.get((p["origin"], p["dest"], d.isoformat(), str(n)), "")) * w, random.random(), p, d, n)
+                for d, n in combos]
+        mine.sort(key=lambda x: (x[0], x[1]))
+        if st.get("ok", 0) == 0:
+            mine = mine[:probe]
+        cand.extend(mine)
+    cand.sort(key=lambda x: (x[0], x[1]))
+    tasks = [{**p, "depart": d, "nights": n} for _, _, p, d, n in cand[: cfg["queries_per_run"]]]
+    random.shuffle(tasks)  # 순서만 섞는다(한 노선에 연달아 몰리지 않게)
+    return tasks
 
 
-def plan_legs(cfg: dict, pairs: list, state: dict, today: date) -> list:
+def plan_legs(cfg: dict, pairs: list, state: dict, today: date, leg_seen: dict = None) -> list:
     """편도 조합용 조회 계획. 노선마다 연속된 날짜 구간(block)의 가는 편·오는 편을 모두 조회한다.
-    같은 시각에 조회한 편도끼리만 짝지어 왕복 일정을 만든다."""
+    같은 시각에 조회한 편도끼리만 짝지어 왕복 일정을 만든다.
+    구간은 무작위가 아니라 "조합이 가장 오래 갱신되지 않은 (노선, 구간)"부터 고른다."""
     budget = cfg.get("oneway_queries_per_run", 0)
     k = cfg.get("oneway_block_days", 10)
     if budget <= 0:
         return []
+    leg_seen = leg_seen or {}
     active = [p for p in pairs
               if state["pairs"].get(f"{p['origin']}-{p['dest']}", {}).get("skip_until", "") < today.isoformat()]
     first = today + timedelta(days=cfg["start_offset_days"])
     k = min(k, cfg["horizon_days"])
     n_blocks = max(0, budget // (2 * k))
-    random.shuffle(active)
-    blocks = []
-    for p in active[:n_blocks]:
-        start = first + timedelta(days=random.randint(0, cfg["horizon_days"] - k))
-        blocks.append({**p, "days": [start + timedelta(days=i) for i in range(k)]})
-    return blocks
+    holidays, need = set(cfg.get("holidays", [])), cfg.get("min_nonwork_days", 2)
+    window = [first + timedelta(days=i) for i in range(cfg["horizon_days"])]
+    valid_n = {d: [n for n in cfg["nights"] if nonwork_days(d, d + timedelta(days=n), holidays) >= need]
+               for d in window}
+    cap = 30  # 한 번도 조합이 만들어지지 않은 날짜의 '오래됨' 점수(일)
+
+    def age(o: str, dst: str, d: date) -> int:
+        ts = leg_seen.get((o, dst, d.isoformat()), "")
+        if not ts:
+            return cap
+        try:
+            return min(cap, (today - date.fromisoformat(ts[:10])).days)
+        except ValueError:
+            return cap
+
+    best = []
+    for p in active:
+        st = state["pairs"].get(f"{p['origin']}-{p['dest']}", {})
+        ages = {d: age(p["origin"], p["dest"], d) for d in window}
+        top = None
+        for s0 in range(0, len(window) - k + 1):
+            days = window[s0:s0 + k]
+            last = days[-1]
+            score = sum(ages[d] for d in days if any(d + timedelta(days=n) <= last for n in valid_n[d]))
+            cand = (score, random.random(), s0)
+            if top is None or cand > top:
+                top = cand
+        if top is None:
+            continue
+        # 직항이 확인되지 않은 노선은 편도 조합 조회를 하지 않는다(왕복 시험 조회로 먼저 확인)
+        if st.get("ok", 0) == 0:
+            continue
+        best.append((top[0] * float(cfg.get("region_weight", {}).get(p["region"], 1)), random.random(), p, top[2]))
+    best.sort(key=lambda x: (-x[0], x[1]))
+    return [{**p, "days": window[s0:s0 + k]} for _, _, p, s0 in best[:n_blocks]]
 
 
 def google_link(origin: str, dest: str, depart: str, ret: str = "") -> str:
@@ -273,6 +333,30 @@ def load_recent_prices(data_dir: Path, today: date, lookback_days: int) -> list:
             except (ValueError, KeyError):
                 continue
     return rows
+
+
+def load_last_seen(data_dir: Path, today: date, lookback_days: int, state: dict):
+    """일정별로 가장 최근에 조회한 시각을 모은다.
+    seen: (출발, 도착, 출발일, 박수) -> 시각 (저장된 가격 + '결과 없음' 기록)
+    leg_seen: (출발, 도착, 출발일) -> 시각 (편도 2장 조합이 만들어진 기록만)"""
+    seen, leg_seen = {}, {}
+    for r in load_recent_prices(data_dir, today, lookback_days):
+        ts = r.get("collected_at", "")
+        k = (r.get("origin"), r.get("destination"), r.get("depart_date"), str(r.get("nights")))
+        if ts > seen.get(k, ""):
+            seen[k] = ts
+        if "+" in (r.get("airlines") or ""):
+            k3 = (r.get("origin"), r.get("destination"), r.get("depart_date"))
+            if ts > leg_seen.get(k3, ""):
+                leg_seen[k3] = ts
+    for ks, ts in state.get("empty_seen", {}).items():
+        try:
+            o, d, dep, n = ks.split("|")
+        except ValueError:
+            continue
+        if ts > seen.get((o, d, dep, n), ""):
+            seen[(o, d, dep, n)] = ts
+    return seen, leg_seen
 
 
 def carrier_group(airlines: str, groups: dict) -> str:
@@ -353,7 +437,13 @@ def main() -> int:
     state.setdefault("pairs", {})
 
     pairs = build_pairs(cfg)
-    tasks = [] if summary_only else plan_tasks(cfg, pairs, state, today)
+    # '결과 없음' 기록은 이미 지난 출발일이나 오래된 것은 지운다
+    cutoff = (today - timedelta(days=cfg.get("seen_lookback_days", 45))).isoformat()
+    state["empty_seen"] = {k: v for k, v in state.get("empty_seen", {}).items()
+                           if k.split("|")[2:3] and k.split("|")[2] >= today.isoformat() and v[:10] >= cutoff}
+    seen, leg_seen = ({}, {}) if summary_only else load_last_seen(
+        data_dir, today, cfg.get("seen_lookback_days", 45), state)
+    tasks = [] if summary_only else plan_tasks(cfg, pairs, state, today, seen, now_kst)
     print(f"전체 조합 {len(pairs)}개 중 이번 조회 {len(tasks)}건 (제외된 조합 제외)")
 
     rows, counts = [], {"ok": 0, "empty": 0, "error": 0}
@@ -384,6 +474,7 @@ def main() -> int:
         elif status == "empty":
             consecutive_errors = 0
             st["empty"] += 1
+            state["empty_seen"][f"{t['origin']}|{t['dest']}|{t['depart'].isoformat()}|{t['nights']}"] = stamp
             limit = cfg.get("empty_limit_new", 5) if st["ok"] == 0 else cfg.get("empty_limit_known", 15)
             if st["empty"] >= limit:
                 st["skip_until"] = (today + timedelta(days=cfg.get("skip_days", 14))).isoformat()
@@ -402,7 +493,7 @@ def main() -> int:
     # 편도 조합: 같은 시각에 조회한 가는 편·오는 편을 짝지어 "왕복 일정"으로 만든다.
     # (항공사를 섞은 조합은 왕복 검색에 나오지 않을 수 있어, 따로 모아 비교한다.)
     combo_n = 0
-    blocks = [] if summary_only else plan_legs(cfg, pairs, state, today)
+    blocks = [] if summary_only else plan_legs(cfg, pairs, state, today, leg_seen)
     print(f"편도 조합용 구간 {len(blocks)}개 조회 시작")
     leg_errors, leg_aborted = 0, False
     for blk in blocks:
@@ -482,6 +573,8 @@ def main() -> int:
     win_lo = today + timedelta(days=cfg["start_offset_days"])
     win_hi = win_lo + timedelta(days=cfg["horizon_days"] - 1)
     recent = [r for r in recent if win_lo.isoformat() <= r.get("depart_date", "") <= win_hi.isoformat()]
+    configured = {(p["origin"], p["dest"]) for p in pairs}  # 지금 조회 대상에 없는 노선(예: 뺀 지역)은 제외
+    recent = [r for r in recent if (r.get("origin"), r.get("destination")) in configured]
     for r in recent:
         try:
             r["leave"] = leave_days(date.fromisoformat(r["depart_date"]), date.fromisoformat(r["return_date"]), holidays)
