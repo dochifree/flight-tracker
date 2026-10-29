@@ -11,7 +11,8 @@
     4,
     5
   ],
-  "max_leave_days": 2,
+  "low_leave_max": 2,
+  "low_leave_share": 0.6,
   "start_offset_days": 1,
   "horizon_days": 120,
   "max_stops": 0,
@@ -25,8 +26,7 @@
   "alert": {
     "ratio": 0.75,
     "min_samples": 8,
-    "lookback_days": 60,
-    "max_leave_days": 2
+    "lookback_days": 60
   },
   "carrier_groups": {
     "저비용": [
