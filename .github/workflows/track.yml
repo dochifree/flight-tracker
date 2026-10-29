@@ -30,4 +30,24 @@ jobs:
           git config user.name "flight-tracker-bot"
           git config user.email "bot@users.noreply.github.com"
           git add data/
-          git diff --cached --quiet || (git commit -m "data: 가격 업데이트 $(date -u +%F\ %H:%M) UTC" && git pull --rebase && git push)
+          if git diff --cached --quiet; then
+            echo "저장할 변경이 없습니다."
+            exit 0
+          fi
+          git commit -m "data: 가격 업데이트 $(date -u +%F\ %H:%M) UTC"
+          # 조회하는 동안 다른 실행이 먼저 저장했어도 충돌 없이 합쳐서 올립니다. (최대 5번 재시도)
+          for i in 1 2 3 4 5; do
+            git fetch origin main
+            if git rebase -X theirs origin/main; then
+              if git push origin HEAD:main; then
+                echo "저장 완료"
+                exit 0
+              fi
+            else
+              git rebase --abort || true
+            fi
+            echo "재시도 $i/5"
+            sleep $((i * 5))
+          done
+          echo "::error::결과를 저장하지 못했습니다."
+          exit 1
