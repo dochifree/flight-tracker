@@ -7,7 +7,7 @@
   },
   "ICN-HKT": {
    "empty": 0,
-   "ok": 11026,
+   "ok": 11029,
    "skip_until": ""
   },
   "GMP-SHE": {
@@ -27,7 +27,7 @@
   },
   "ICN-TAG": {
    "empty": 0,
-   "ok": 11119,
+   "ok": 11124,
    "skip_until": ""
   },
   "GMP-CGK": {
@@ -57,12 +57,12 @@
   },
   "ICN-CGK": {
    "empty": 0,
-   "ok": 11038,
+   "ok": 11040,
    "skip_until": ""
   },
   "ICN-CXR": {
    "empty": 0,
-   "ok": 11097,
+   "ok": 11111,
    "skip_until": ""
   },
   "ICN-CSX": {
@@ -77,12 +77,12 @@
   },
   "ICN-HAN": {
    "empty": 0,
-   "ok": 11085,
+   "ok": 11088,
    "skip_until": ""
   },
   "ICN-MYJ": {
    "empty": 0,
-   "ok": 10401,
+   "ok": 10404,
    "skip_until": ""
   },
   "GMP-CNX": {
@@ -97,7 +97,7 @@
   },
   "ICN-DAD": {
    "empty": 0,
-   "ok": 11040,
+   "ok": 11041,
    "skip_until": ""
   },
   "GMP-WEH": {
@@ -127,7 +127,7 @@
   },
   "ICN-KMQ": {
    "empty": 0,
-   "ok": 10920,
+   "ok": 10924,
    "skip_until": ""
   },
   "ICN-HGH": {
@@ -182,12 +182,12 @@
   },
   "GMP-HND": {
    "empty": 0,
-   "ok": 11067,
+   "ok": 11074,
    "skip_until": ""
   },
   "ICN-KOJ": {
    "empty": 0,
-   "ok": 10739,
+   "ok": 10746,
    "skip_until": ""
   },
   "ICN-HAK": {
@@ -227,7 +227,7 @@
   },
   "GMP-KIX": {
    "empty": 0,
-   "ok": 11110,
+   "ok": 11115,
    "skip_until": ""
   },
   "GMP-NGS": {
@@ -242,7 +242,7 @@
   },
   "GMP-NGO": {
    "empty": 0,
-   "ok": 11093,
+   "ok": 11094,
    "skip_until": ""
   },
   "GMP-XIY": {
@@ -252,7 +252,7 @@
   },
   "ICN-VTE": {
    "empty": 0,
-   "ok": 11069,
+   "ok": 11072,
    "skip_until": ""
   },
   "GMP-SDJ": {
@@ -287,7 +287,7 @@
   },
   "ICN-PQC": {
    "empty": 0,
-   "ok": 11144,
+   "ok": 11152,
    "skip_until": ""
   },
   "GMP-HAK": {
@@ -307,7 +307,7 @@
   },
   "ICN-KIX": {
    "empty": 0,
-   "ok": 11134,
+   "ok": 11144,
    "skip_until": ""
   },
   "ICN-SHE": {
@@ -327,7 +327,7 @@
   },
   "ICN-CEB": {
    "empty": 0,
-   "ok": 11194,
+   "ok": 11199,
    "skip_until": ""
   },
   "GMP-DAD": {
@@ -352,12 +352,12 @@
   },
   "ICN-BKK": {
    "empty": 0,
-   "ok": 11183,
+   "ok": 11189,
    "skip_until": ""
   },
   "ICN-NRT": {
    "empty": 0,
-   "ok": 11065,
+   "ok": 11069,
    "skip_until": ""
   },
   "GMP-TAG": {
@@ -372,7 +372,7 @@
   },
   "ICN-CNX": {
    "empty": 0,
-   "ok": 10428,
+   "ok": 10429,
    "skip_until": ""
   },
   "GMP-KMQ": {
@@ -392,7 +392,7 @@
   },
   "ICN-CRK": {
    "empty": 0,
-   "ok": 11016,
+   "ok": 11018,
    "skip_until": ""
   },
   "GMP-TFU": {
@@ -457,7 +457,7 @@
   },
   "ICN-MNL": {
    "empty": 0,
-   "ok": 10977,
+   "ok": 10980,
    "skip_until": ""
   },
   "GMP-SZX": {
@@ -467,12 +467,12 @@
   },
   "ICN-SDJ": {
    "empty": 0,
-   "ok": 9361,
+   "ok": 9363,
    "skip_until": ""
   },
   "ICN-BKI": {
    "empty": 0,
-   "ok": 11122,
+   "ok": 11123,
    "skip_until": ""
   },
   "ICN-SZX": {
@@ -482,7 +482,7 @@
   },
   "ICN-SGN": {
    "empty": 0,
-   "ok": 11093,
+   "ok": 11098,
    "skip_until": ""
   },
   "ICN-TAO": {
@@ -497,7 +497,7 @@
   },
   "ICN-CTS": {
    "empty": 0,
-   "ok": 10043,
+   "ok": 10047,
    "skip_until": ""
   },
   "GMP-PEN": {
@@ -512,12 +512,12 @@
   },
   "ICN-KMJ": {
    "empty": 0,
-   "ok": 11013,
+   "ok": 11014,
    "skip_until": ""
   },
   "ICN-NGO": {
    "empty": 0,
-   "ok": 11046,
+   "ok": 11048,
    "skip_until": ""
   },
   "GMP-NRT": {
@@ -542,12 +542,12 @@
   },
   "ICN-HND": {
    "empty": 0,
-   "ok": 11204,
+   "ok": 11206,
    "skip_until": ""
   },
   "ICN-FUK": {
    "empty": 0,
-   "ok": 10716,
+   "ok": 10719,
    "skip_until": ""
   },
   "GMP-HRB": {
@@ -557,7 +557,7 @@
   },
   "ICN-TAK": {
    "empty": 0,
-   "ok": 10880,
+   "ok": 10882,
    "skip_until": ""
   },
   "ICN-PVG": {
@@ -582,12 +582,12 @@
   },
   "ICN-KLO": {
    "empty": 0,
-   "ok": 9616,
+   "ok": 9618,
    "skip_until": ""
   },
   "ICN-OIT": {
    "empty": 0,
-   "ok": 10914,
+   "ok": 10915,
    "skip_until": ""
   },
   "GMP-KMJ": {
@@ -597,7 +597,7 @@
   },
   "ICN-NGS": {
    "empty": 0,
-   "ok": 3687,
+   "ok": 3691,
    "skip_until": ""
   },
   "ICN-KMG": {
@@ -622,7 +622,7 @@
   },
   "ICN-SIN": {
    "empty": 0,
-   "ok": 11096,
+   "ok": 11098,
    "skip_until": ""
   },
   "GMP-KMG": {
@@ -637,7 +637,7 @@
   },
   "ICN-HIJ": {
    "empty": 0,
-   "ok": 10874,
+   "ok": 10877,
    "skip_until": ""
   },
   "ICN-NKG": {
@@ -692,17 +692,17 @@
   },
   "ICN-KUL": {
    "empty": 0,
-   "ok": 11003,
+   "ok": 11004,
    "skip_until": ""
   },
   "ICN-AOJ": {
    "empty": 0,
-   "ok": 5356,
+   "ok": 5363,
    "skip_until": ""
   },
   "ICN-DPS": {
    "empty": 0,
-   "ok": 11003,
+   "ok": 11006,
    "skip_until": ""
   },
   "GMP-TAO": {
@@ -732,22 +732,22 @@
   },
   "GMP-KHH": {
    "empty": 0,
-   "ok": 10355,
+   "ok": 10358,
    "skip_until": ""
   },
   "ICN-RMQ": {
    "empty": 0,
-   "ok": 10658,
+   "ok": 10662,
    "skip_until": ""
   },
   "ICN-TPE": {
    "empty": 0,
-   "ok": 10873,
+   "ok": 10876,
    "skip_until": ""
   },
   "GMP-TSA": {
    "empty": 0,
-   "ok": 10652,
+   "ok": 10654,
    "skip_until": ""
   },
   "ICN-TSA": {
@@ -762,7 +762,7 @@
   },
   "ICN-KHH": {
    "empty": 0,
-   "ok": 10793,
+   "ok": 10795,
    "skip_until": ""
   },
   "GMP-TNN": {
@@ -771,7 +771,7 @@
    "skip_until": "2026-11-27"
   }
  },
- "updated_at": "2026-11-19 13:39",
+ "updated_at": "2026-11-19 19:04",
  "empty_seen": {
   "ICN|NGS|2027-01-29|3": "2026-11-19 12:53",
   "ICN|AOJ|2027-02-10|4": "2026-10-29 17:08",
