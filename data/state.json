@@ -7,7 +7,7 @@
   },
   "ICN-HKT": {
    "empty": 0,
-   "ok": 11167,
+   "ok": 11170,
    "skip_until": ""
   },
   "GMP-SHE": {
@@ -82,7 +82,7 @@
   },
   "ICN-MYJ": {
    "empty": 0,
-   "ok": 10532,
+   "ok": 10533,
    "skip_until": ""
   },
   "GMP-CNX": {
@@ -182,12 +182,12 @@
   },
   "GMP-HND": {
    "empty": 0,
-   "ok": 11200,
+   "ok": 11202,
    "skip_until": ""
   },
   "ICN-KOJ": {
    "empty": 0,
-   "ok": 10867,
+   "ok": 10871,
    "skip_until": ""
   },
   "ICN-HAK": {
@@ -242,7 +242,7 @@
   },
   "GMP-NGO": {
    "empty": 0,
-   "ok": 11205,
+   "ok": 11210,
    "skip_until": ""
   },
   "GMP-XIY": {
@@ -392,7 +392,7 @@
   },
   "ICN-CRK": {
    "empty": 0,
-   "ok": 11141,
+   "ok": 11142,
    "skip_until": ""
   },
   "GMP-TFU": {
@@ -497,7 +497,7 @@
   },
   "ICN-CTS": {
    "empty": 0,
-   "ok": 10158,
+   "ok": 10160,
    "skip_until": ""
   },
   "GMP-PEN": {
@@ -597,7 +597,7 @@
   },
   "ICN-NGS": {
    "empty": 0,
-   "ok": 3731,
+   "ok": 3734,
    "skip_until": ""
   },
   "ICN-KMG": {
@@ -732,7 +732,7 @@
   },
   "GMP-KHH": {
    "empty": 0,
-   "ok": 10480,
+   "ok": 10481,
    "skip_until": ""
   },
   "ICN-RMQ": {
@@ -771,7 +771,7 @@
    "skip_until": "2026-11-27"
   }
  },
- "updated_at": "2026-11-20 07:32",
+ "updated_at": "2026-11-20 12:52",
  "empty_seen": {
   "ICN|NGS|2027-01-29|3": "2026-11-19 12:53",
   "ICN|AOJ|2027-02-10|4": "2026-10-29 17:08",
